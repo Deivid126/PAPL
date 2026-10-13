@@ -195,6 +195,50 @@ describe('ApplicationRunPage', () => {
     );
   });
 
+  it('não envia a mesma resposta duas vezes quando os flushes se sobrepõem', async () => {
+    const itemPosts: string[] = [];
+    apiMocks.api.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === '/applications/app1') return makeApp(1);
+      if (url === '/protocol/steps') return protocolSteps;
+      if (url === '/applications/app1/steps/1/items' && init?.method === 'POST') {
+        itemPosts.push(String(init.body));
+        // Latência maior que o debounce de 900ms de queueSave: o timer
+        // dispara um segundo flush enquanto o primeiro ainda está na
+        // rede. Sem serializar, esse segundo lê savedSignaturesRef antes
+        // de o primeiro gravá-la e reenvia a mesma resposta.
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        return {};
+      }
+      return {};
+    });
+
+    renderRun();
+    await screen.findByRole('heading', { name: 'Conhecimento do alfabeto' });
+
+    // Responder agenda o salvamento por timer; avançar dispara um flush
+    // direto. É a sobreposição dos dois que gerava a rajada.
+    let choiceGroup = screen.getByRole('group', { name: 'Escolha uma letra' });
+    fireEvent.click(within(choiceGroup).getAllByRole('button')[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Próximo exemplo/ }));
+    await screen.findByText(/Exemplo 2/, undefined, { timeout: 8000 });
+    choiceGroup = screen.getByRole('group', { name: 'Escolha uma letra' });
+    fireEvent.click(within(choiceGroup).getAllByRole('button')[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Ir para a prova/ }));
+
+    // Já na prova: responder chama setUnit, que agenda o salvamento por
+    // timer. Prosseguir em seguida dispara um flush direto, que ainda
+    // está na rede quando o timer vence.
+    choiceGroup = screen.getByRole('group', { name: 'Escolha uma letra' });
+    fireEvent.click(within(choiceGroup).getAllByRole('button')[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Prosseguir|Concluir etapa/ }));
+
+    await waitFor(() => expect(itemPosts.length).toBeGreaterThan(0), { timeout: 8000 });
+    // Deixa os timers pendentes de queueSave rodarem até o fim.
+    await new Promise((resolve) => setTimeout(resolve, 3000));
+
+    expect(itemPosts).toHaveLength(new Set(itemPosts).size);
+  });
+
   it('navega entre as etapas após concluir', async () => {
     apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
       if (url === '/applications/app1') return makeApp(1);

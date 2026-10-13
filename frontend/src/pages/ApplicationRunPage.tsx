@@ -123,6 +123,7 @@ export function ApplicationRunPage() {
   const [modalError, setModalError] = useState<string | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedSignaturesRef = useRef<Record<string, string>>({});
+  const flushChainRef = useRef<Promise<void>>(Promise.resolve());
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -256,7 +257,23 @@ export function ApplicationRunPage() {
     }, 900);
   }
 
-  async function flushAll() {
+  /**
+   * Enfileira um flush, garantindo que nunca haja dois em andamento.
+   *
+   * flushAll é disparado tanto pelo timer de queueSave quanto por cada
+   * botão de avançar. Sem serializar, duas execuções percorrem os itens
+   * ao mesmo tempo e ambas leem a assinatura antiga em
+   * savedSignaturesRef — que só é gravada depois do await da rede. O
+   * resultado é cada resposta sendo enviada em duplicidade, numa rajada
+   * que escala as instâncias serverless e esgota as conexões do banco.
+   */
+  function flushAll(): Promise<void> {
+    const next = flushChainRef.current.then(runFlush, runFlush);
+    flushChainRef.current = next.catch(() => undefined);
+    return next;
+  }
+
+  async function runFlush() {
     if (!app) return;
     const stepNumber = currentStep;
     const latest = statesRef.current;
@@ -1278,6 +1295,25 @@ function AlphabetStepView({
     ? trainingAnswer
     : states[String(currentUnit.itemNumber)]?.childAnswer ?? null;
   const canContinue = selectedAnswer !== null && selectedAnswer !== '';
+
+  // Tablets e celulares só liberam a síntese de fala a partir de um gesto
+  // do usuário, então a chamada automática ao entrar no item é ignorada.
+  // O primeiro toque da sessão destrava o motor com um enunciado mudo, e
+  // a partir daí a leitura automática passa a funcionar também no tablet.
+  useEffect(() => {
+    if (!('speechSynthesis' in window)) return;
+    function prime() {
+      try {
+        const silent = new SpeechSynthesisUtterance('');
+        silent.volume = 0;
+        window.speechSynthesis.speak(silent);
+      } catch {
+        // Sem fala disponível: o botão de ouvir novamente continua valendo.
+      }
+    }
+    document.addEventListener('pointerdown', prime, { once: true, capture: true });
+    return () => document.removeEventListener('pointerdown', prime, { capture: true });
+  }, []);
 
   function speakQuestion() {
     if (!('speechSynthesis' in window)) return;
