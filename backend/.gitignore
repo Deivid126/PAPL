@@ -7,3 +7,6 @@ coverage/
 storage/
 test-storage/
 logs/
+.vercel
+.env*
+!.env.example
