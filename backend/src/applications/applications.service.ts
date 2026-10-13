@@ -300,13 +300,21 @@ export class ApplicationsService {
     const hasData = agg._count > 0;
     const current = await this.prisma.applicationStep.findUnique({
       where: { id: applicationStepId },
-      select: { startedAt: true },
+      select: { startedAt: true, status: true },
     });
     return this.prisma.applicationStep.update({
       where: { id: applicationStepId },
       data: {
         score,
-        status: hasData ? 'IN_PROGRESS' : 'NOT_STARTED',
+        // Uma etapa concluída não volta a ficar em andamento. Este
+        // recálculo roda a cada autosave, então sem a guarda qualquer
+        // gravação posterior rebaixava o status e a conclusão se perdia.
+        status:
+          current?.status === 'COMPLETED'
+            ? 'COMPLETED'
+            : hasData
+              ? 'IN_PROGRESS'
+              : 'NOT_STARTED',
         ...(hasData && !current?.startedAt ? { startedAt: new Date() } : {}),
       },
     });
