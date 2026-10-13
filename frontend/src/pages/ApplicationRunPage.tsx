@@ -261,6 +261,12 @@ export function ApplicationRunPage() {
   /**
    * Enfileira um flush, garantindo que nunca haja dois em andamento.
    *
+   * Ao trocar de item dentro da mesma etapa a navegacao nao espera por
+   * ele: a tela avanca na hora e a gravacao corre atras, porque a espera
+   * de uma ida a rede por item era o que travava a aplicacao. Nas trocas
+   * de subetapa e de etapa o flush continua aguardado, ja que ali units e
+   * stepNumber mudam e uma gravacao pendente escreveria no lugar errado.
+   *
    * flushAll é disparado tanto pelo timer de queueSave quanto por cada
    * botão de avançar. Sem serializar, duas execuções percorrem os itens
    * ao mesmo tempo e ambas leem a assinatura antiga em
@@ -423,7 +429,7 @@ export function ApplicationRunPage() {
     const { phase, index, trainingCount, setPhase, setIndex, onStart } = options;
     try {
       if (index > 0) {
-        if (phase === 'TEST') await flushAll();
+        if (phase === 'TEST') void flushAll();
         setIndex((current) => current - 1);
         return;
       }
@@ -640,7 +646,7 @@ export function ApplicationRunPage() {
                 return;
               }
               if (alphabetIndex < groupUnits.length - 1) {
-                await flushAll();
+                void flushAll();
                 setAlphabetIndex((index) => index + 1);
                 return;
               }
@@ -683,7 +689,7 @@ export function ApplicationRunPage() {
                 return;
               }
               if (synthesisIndex < synthesisUnits.length - 1) {
-                await flushAll();
+                void flushAll();
                 setSynthesisIndex((index) => index + 1);
                 return;
               }
@@ -731,7 +737,7 @@ export function ApplicationRunPage() {
                 return;
               }
               if (segmentationIndex < segmentationUnits.length - 1) {
-                await flushAll();
+                void flushAll();
                 setSegmentationIndex((index) => index + 1);
                 return;
               }
@@ -785,7 +791,7 @@ export function ApplicationRunPage() {
                 return;
               }
               if (phonemeIndex < phonemeUnits.length - 1) {
-                await flushAll();
+                void flushAll();
                 setPhonemeIndex((index) => index + 1);
                 return;
               }
@@ -834,7 +840,7 @@ export function ApplicationRunPage() {
                 return;
               }
               if (productionIndex < productionUnits.length - 1) {
-                await flushAll();
+                void flushAll();
                 setProductionIndex((index) => index + 1);
                 return;
               }
@@ -871,7 +877,7 @@ export function ApplicationRunPage() {
                 return;
               }
               if (comprehensionIndex < units.length - 1) {
-                await flushAll();
+                void flushAll();
                 setComprehensionIndex((index) => index + 1);
                 return;
               }
