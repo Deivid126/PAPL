@@ -1071,6 +1071,15 @@ function SegmentationStepView({
   const comprehensionSentence = isComprehension
     ? (phase === 'TRAINING' ? parts[1] ?? '' : currentUnit?.prompt ?? '')
     : '';
+  // A cena da pergunta ja vem no imageKey do item (e, no treino, no
+  // quarto campo do exemplo, com a pasta ja prefixada). Antes a tela
+  // mostrava so a frase, e a figura ficava sem uso.
+  const comprehensionQuestionImage = !isComprehension
+    ? ''
+    : phase === 'TRAINING'
+      ? (parts[3] ?? '')
+      : (currentUnit?.imageKey ?? '');
+
   const comprehensionEntry = isComprehension
     ? COMPREHENSION_CHOICES.find((c) => c[1] === word) ?? null
     : null;
@@ -1081,13 +1090,19 @@ function SegmentationStepView({
           ? (parts[2] ?? '') + '.png'
           : (currentUnit?.expectedAnswer ?? '') + '.png')
     : '';
-  const comprehensionOptions = isComprehension && comprehensionTargetFile
-    ? (comprehensionEntry
-        ? [comprehensionEntry[2], comprehensionEntry[3], comprehensionEntry[4]]
-        : [comprehensionTargetFile, '', '']
-      ).filter(Boolean)
-      .map((img) => ({ imageKey: `compreensao_sentencas/respostas/${img}`, label: '' }))
-    : [];
+  // Embaralhado: a figura certa vinha sempre no primeiro quadro, e a
+  // crianca podia acertar pela posicao em vez de pela frase.
+  const comprehensionOptions = useMemo(() => {
+    if (!isComprehension || !comprehensionTargetFile) return [];
+    const arquivos = (comprehensionEntry
+      ? [comprehensionEntry[2], comprehensionEntry[3], comprehensionEntry[4]]
+      : [comprehensionTargetFile, '', '']
+    ).filter(Boolean);
+    return shuffled(arquivos).map((img) => ({
+      imageKey: `compreensao_sentencas/respostas/${img}`,
+      label: '',
+    }));
+  }, [isComprehension, comprehensionTargetFile, comprehensionEntry]);
 
   // Opções (modo produção): imagem correta + dois distratores fixos por item.
   // Figura correta da tarefa de produção. Fica fora do useMemo porque
@@ -1190,9 +1205,9 @@ function SegmentationStepView({
               ? 'Fale um som ou sílaba e peça uma palavra que comece com ele. Faça os exemplos juntos antes da prova.'
               : 'Fale o som/sílaba e a criança diz uma palavra que comece com ele. Marque acerto ou erro.'
             : isComprehension
-              ? phase === 'TRAINING'
-                ? 'Fale a frase e mostre a cena. Faça os exemplos juntos antes da prova.'
-                : 'Fale a frase; a criança aponta a figura que completa a frase.'
+              ? (phase === 'TRAINING'
+                  ? `Leia em voz alta: “${comprehensionSentence}”. Faça os exemplos juntos antes da prova.`
+                  : `Leia em voz alta: “${comprehensionSentence}”. A criança toca na figura que completa a frase.`)
               : isPhoneme
                 ? phase === 'TRAINING'
                   ? 'Mostre a figura e peça à criança que toque na letra com que a palavra começa. Faça os exemplos juntos antes da prova.'
@@ -1239,11 +1254,13 @@ function SegmentationStepView({
         )}
       </section>
 
-      {isComprehension && (
+      {isComprehension && comprehensionQuestionImage && (
         <div className="comprehension-question">
-          <p className="comprehension-sentence">
-            {comprehensionSentence}
-          </p>
+          <img
+            src={storageUrl(comprehensionQuestionImage)}
+            alt=""
+            className="comprehension-scene"
+          />
         </div>
       )}
 

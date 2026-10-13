@@ -1942,3 +1942,19 @@ code {
     max-height: calc(100dvh - 18rem);
   }
 }
+
+/* Etapa 4: a cena é a pergunta. É o elemento dominante, mas divide a
+   altura com as três figuras de resposta logo abaixo. */
+.comprehension-question {
+  display: grid;
+  place-items: center;
+  min-height: 0;
+}
+
+.comprehension-scene {
+  max-width: 100%;
+  max-height: min(31vh, 17rem);
+  height: auto;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+}
