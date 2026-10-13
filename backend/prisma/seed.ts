@@ -483,7 +483,19 @@ async function seedDevUser() {
 
 async function main() {
   await seedProtocol();
-  await seedDevUser();
+
+  // O usuário de desenvolvimento tem credenciais conhecidas e documentadas
+  // no .env.example, então nunca deve ser criado em produção. Para criá-lo
+  // deliberadamente fora de desenvolvimento, use SEED_DEV_USER=true.
+  const seedUser =
+    process.env.SEED_DEV_USER === 'true' ||
+    (process.env.SEED_DEV_USER !== 'false' && process.env.NODE_ENV !== 'production');
+
+  if (seedUser) {
+    await seedDevUser();
+  } else {
+    console.log('Usuário de desenvolvimento ignorado (NODE_ENV=production).');
+  }
 }
 
 main()
