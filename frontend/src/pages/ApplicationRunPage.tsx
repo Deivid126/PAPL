@@ -1161,10 +1161,18 @@ function SegmentationStepView({
   const IPA_TO_LETTER: Record<string, string> = {
     a: 'A', e: 'E', i: 'I', o: 'O', u: 'U',
     s: 'S', f: 'F', v: 'V', z: 'Z',
-    'ʒ': 'J', 'ʃ': 'X', Ra: 'R', R: 'R', '3': 'J',
+    // /ʃ/ aparece no item cuja resposta é "chave", então o grafema é CH.
+    // Antes mapeava para X, e a tela mostrava uma letra que não combina
+    // com a palavra esperada.
+    'ʒ': 'J', 'ʃ': 'CH', Ra: 'R', R: 'R', '3': 'J',
   };
   const mappedLetter = IPA_TO_LETTER[promptLetter.toLowerCase()];
-  const letterImage = isProduction && mappedLetter ? `producao/letras/${mappedLetter}.png` : null;
+  // Só há imagem para letras isoladas (A–Z); dígrafos como CH vão como
+  // texto, no mesmo tamanho.
+  const letterImage =
+    isProduction && mappedLetter && mappedLetter.length === 1
+      ? `producao/letras/${mappedLetter}.png`
+      : null;
 
   return (
     <div className="step-view segmentation-step-view">
@@ -1196,7 +1204,7 @@ function SegmentationStepView({
               {letterImage ? (
                 <img src={storageUrl(letterImage)} alt={`Som ${syllables}`} className="production-letter" />
               ) : (
-                <span className="production-letter-text">{syllables}</span>
+                <span className="production-letter-text">{mappedLetter ?? syllables}</span>
               )}
             </div>
             {phase === 'TRAINING' && productionExamples.length > 0 && (
