@@ -953,13 +953,23 @@ function SegmentationStepView({
     : [];
 
   // Opções (modo produção): imagem correta + dois distratores fixos por item.
+  // Figura correta da tarefa de produção. Fica fora do useMemo porque
+  // tanto a montagem das opções quanto a conferência da resposta dependem
+  // dela — manter as duas derivando da mesma variável evita que voltem a
+  // divergir.
+  const productionCorrectFile = !isProduction
+    ? ''
+    : phase === 'TRAINING'
+      ? parts[3] ?? ''
+      : (currentUnit?.imageKey ?? '').split('/').pop() ?? '';
+  const productionCorrectKey = `producao/objetos/${productionCorrectFile}`;
+
   const productionOptions = useMemo(() => {
     if (!isProduction) return [];
-    const correct = phase === 'TRAINING' ? parts[3] ?? '' : (currentUnit?.imageKey ?? '').split('/').pop() ?? '';
-    const entry = PRODUCTION_CHOICES.find((choice) => choice[2] === correct);
-    if (!entry) return [{ imageKey: `producao/objetos/${correct}`, label: word }];
+    const entry = PRODUCTION_CHOICES.find((choice) => choice[2] === productionCorrectFile);
+    if (!entry) return [{ imageKey: productionCorrectKey, label: word }];
     return [entry[2], entry[3], entry[4]].map((img) => ({ imageKey: `producao/objetos/${img}`, label: '' }));
-  }, [isProduction, phase, parts, currentUnit, word]);
+  }, [isProduction, productionCorrectFile, productionCorrectKey, word]);
 
   // Figuras dos exemplos aceitos do treino (ex.: sapo, cinto, sol).
   const EXAMPLE_IMAGES: Record<string, string> = {
@@ -1099,7 +1109,10 @@ function SegmentationStepView({
       {isProduction && (
         <div className="synthesis-options production-options" role="group" aria-label="Figuras de apoio">
           {productionOptions.map((option) => {
-            const isCorrectImage = option.imageKey === storageUrl("producao/objetos/" + ((phase === 'TRAINING' ? parts[3] ?? '' : (currentUnit?.imageKey ?? '').split('/').pop() ?? '')));
+            // Compara chave com chave. Passar o lado direito por
+            // storageUrl() montava uma URL, que nunca é igual ao imageKey
+            // cru da opção — então nenhuma resposta era aceita.
+            const isCorrectImage = option.imageKey === productionCorrectKey;
             // Marcação visual é local da visita: verde na figura certa, vermelho na errada.
             const stateClass = visitedMark === null
               ? ''
