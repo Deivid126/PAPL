@@ -1635,3 +1635,214 @@ code {
     font-size: clamp(3.5rem, 18vw, 6rem);
   }
 }
+/* ======================================================================
+   Aplicação do protocolo — tela de uso em tablet
+
+   A tela atende dois públicos de uma vez. A criança, em idade
+   pré-escolar, precisa enxergar só a tarefa: ela ainda não lê, então
+   todo texto em volta vira ruído que o olho persegue sem decodificar.
+   O avaliador precisa de contexto e controles, mas lê de pé, a um
+   braço de distância, e consulta a faixa só entre um item e outro.
+
+   Daí a separação: tudo do avaliador vive numa faixa fina e discreta,
+   e o restante da tela é palco da tarefa.
+   ====================================================================== */
+
+.page-run {
+  max-width: 1180px;
+  gap: 0.85rem;
+}
+
+.run-rail {
+  align-items: center;
+  gap: 0.6rem 1.25rem;
+  padding-bottom: 0.7rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.run-rail-id h1 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+.run-rail-id .page-subtitle {
+  margin-top: 0.1rem;
+  font-size: 0.85rem;
+}
+
+.run-rail .page-actions { gap: 0.5rem; }
+
+.run-rail .jump-nav span { font-size: 0.85rem; }
+
+.run-rail .jump-nav .input,
+.run-rail .btn {
+  padding-block: 0.4rem;
+  font-size: 0.875rem;
+}
+
+/* Progresso e autosave numa linha só: são confirmação periférica para o
+   avaliador, não conteúdo. */
+.run-rail-status {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.run-rail-status .progress-wrap { flex: 1; min-width: 0; }
+
+.run-rail-status .save-status {
+  margin: 0;
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
+/* Linha única de contexto do item, no lugar do antigo bloco de
+   sobretítulo, título e instrução repetida a cada item. */
+.task-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.task-meta-text {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--color-text-muted);
+}
+
+.run-rail .btn,
+.task-meta .audio-question-button {
+  touch-action: manipulation;
+}
+
+/* ---------- O palco da criança ---------- */
+
+/* As letras ganham o espaço que o texto devolveu. A altura acompanha a
+   viewport porque tablet em paisagem é largo e baixo: dimensionar só
+   por vw estouraria a tela na horizontal. */
+.page-run .alphabet-options {
+  gap: 1.25rem;
+}
+
+.page-run .alphabet-option {
+  min-height: clamp(11rem, 42vh, 22rem);
+  font-size: clamp(5rem, 26vh, 14rem);
+  border-width: 2px;
+  box-shadow: 0 1px 2px rgba(31, 36, 48, 0.05), 0 6px 20px rgba(31, 36, 48, 0.07);
+}
+
+.page-run .alphabet-option:hover,
+.page-run .alphabet-option:focus-visible {
+  border-color: var(--color-primary);
+  box-shadow: 0 2px 4px rgba(59, 91, 219, 0.1), 0 10px 28px rgba(59, 91, 219, 0.14);
+}
+
+.page-run .alphabet-option:active {
+  transform: translateY(0) scale(0.985);
+}
+
+.page-run .alphabet-stimulus {
+  min-height: clamp(7rem, 24vh, 13rem);
+  font-size: clamp(4rem, 16vh, 9rem);
+}
+
+/* Tablet em paisagem: pouca altura disponível, então a faixa encolhe
+   mais ainda para o palco não ser espremido. */
+@media (min-width: 768px) and (max-height: 820px) and (orientation: landscape) {
+  .page-run { gap: 0.6rem; }
+  .run-rail { padding-bottom: 0.5rem; }
+  .run-rail-id h1 { font-size: 0.95rem; }
+  .page-run .alphabet-option { min-height: clamp(9rem, 38vh, 18rem); }
+  .page-run .step-nav { margin-top: 0.25rem; }
+}
+
+/* ---------- Superfícies do navegador ---------- */
+
+::selection {
+  background: var(--color-primary-soft);
+  color: var(--color-primary-dark);
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+}
+
+/* Roteiro de administração: o avaliador precisa dele, a criança não lê.
+   Fica presente e legível para um adulto, mas sem peso tipográfico que
+   dispute com a tarefa. */
+.task-meta-stacked {
+  display: block;
+}
+
+.task-meta-script {
+  margin: 0.2rem 0 0;
+  font-size: 0.9rem;
+  color: var(--color-text-muted);
+  max-width: 70ch;
+}
+
+.task-meta-stacked .synthesis-reference {
+  margin-top: 0.6rem;
+}
+
+/* O palco precisa ocupar a altura disponível: a criança está de frente
+   para o tablet, e espaço morto embaixo só reduz o tamanho das figuras.
+   O contêiner da aplicação é display:block, então a altura vem daqui. */
+/* Só em paisagem: aí o palco fica baixo e sobrava faixa morta embaixo.
+   Em retrato o shell exibe uma barra superior e a página começa bem mais
+   abaixo, então forçar altura empurrava a navegação para fora da tela. */
+@media (orientation: landscape) and (min-width: 900px) {
+  .page-run {
+    min-height: calc(100dvh - 4rem);
+  }
+}
+
+.page-run .step-view {
+  flex: 1;
+  min-height: 0;
+}
+
+.page-run .alphabet-choice,
+.page-run .alphabet-step-view .alphabet-options {
+  flex: 1;
+  min-height: 0;
+}
+
+.page-run .alphabet-option {
+  height: 100%;
+  min-height: 8rem;
+}
+
+/* A faixa já é fina o bastante; encolher os cartões em paisagem só
+   devolvia espaço vazio. */
+@media (min-width: 768px) and (max-height: 820px) and (orientation: landscape) {
+  .page-run .alphabet-option { min-height: 7rem; }
+}
+
+/* O botão é um elemento de bloco: sem isto a letra assenta pela linha de
+   base do texto e fica fora do centro óptico do cartão. */
+.page-run .alphabet-option {
+  display: grid;
+  place-items: center;
+  line-height: 1;
+  padding: 0.5rem;
+  aspect-ratio: 4 / 5;
+  height: auto;
+  min-height: 0;
+}
+
+/* Esticar o cartão até o fim da altura disponível deixava um retângulo
+   alto e estreito. Com proporção fixa, o conjunto é centralizado no
+   palco e a folga se distribui em cima e embaixo. */
+.page-run .alphabet-choice { justify-content: center; }
+
+.page-run .alphabet-step-view .alphabet-options {
+  flex: 0 1 auto;
+  align-content: center;
+}

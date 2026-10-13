@@ -510,12 +510,13 @@ export function ApplicationRunPage() {
   }
 
   return (
-    <div className="page page-app">
-      <header className="page-header">
-        <div>
+    <div className="page page-app page-run">
+      <header className="page-header run-rail">
+        <div className="run-rail-id">
           <h1>{SKILL_LABELS[currentStepData?.skill ?? ''] ?? `Etapa ${currentStep}`}</h1>
           <p className="page-subtitle">
-            {app.child?.name} • {formatDate(app.child?.birthDate)} • {currentStepData?.maxScore ? `Máx ${currentStepData.maxScore} pts` : ''}
+            {app.child?.name} · Etapa {currentStep} de 4
+            {currentStepData?.maxScore ? ` · máx ${currentStepData.maxScore} pts` : ''}
           </p>
         </div>
         <div className="page-actions">
@@ -545,12 +546,14 @@ export function ApplicationRunPage() {
         </div>
       </header>
 
-      <ProgressBar value={isReview ? 4 : currentStep} max={4} label="Progresso do protocolo" />
+      <div className="run-rail-status">
+        <ProgressBar value={isReview ? 4 : currentStep} max={4} label="Progresso do protocolo" />
+        <p className="save-status" aria-live="polite">
+          {saving ? 'Salvando...' : savedAt ? `Salvo ${savedAt}` : 'Salvamento automático'}
+        </p>
+      </div>
 
       {error && <Alert variant="error">{error}</Alert>}
-      <p className="save-status" aria-live="polite">
-        {saving ? 'Salvando respostas...' : savedAt ? `Salvo às ${savedAt}` : 'Respostas salvas automaticamente.'}
-      </p>
 
       {isReview ? (
         <ReviewView
@@ -1022,10 +1025,14 @@ function SegmentationStepView({
 
   return (
     <div className="step-view segmentation-step-view">
-      <section className="alphabet-instructions" aria-live="polite">
-        <span className="step-kicker">{phase === 'TRAINING' ? 'Treino' : 'Prova'} · {title}</span>
-        <h2>{phase === 'TRAINING' ? parts[0] ?? 'Treino' : `Item ${itemIndex + 1} de ${units.length}`}</h2>
-        <p>
+      <section className="task-meta task-meta-stacked" aria-live="polite">
+        <p className="task-meta-text">
+          {phase === 'TRAINING' ? 'Treino' : 'Prova'} · {title}
+          {phase === 'TRAINING'
+            ? parts[0] ? ` · ${parts[0]}` : ''
+            : ` · Item ${itemIndex + 1} de ${units.length}`}
+        </p>
+        <p className="task-meta-script">
           {isProduction
             ? phase === 'TRAINING'
               ? 'Fale um som ou sílaba e peça uma palavra que comece com ele. Faça os exemplos juntos antes da prova.'
@@ -1248,10 +1255,14 @@ function SynthesisStepView({
 
   return (
     <div className="step-view synthesis-step-view">
-      <section className="alphabet-instructions" aria-live="polite">
-        <span className="step-kicker">{phase === 'TRAINING' ? 'Treino' : 'Prova'} · Síntese silábica</span>
-        <h2>{phase === 'TRAINING' ? parts[0] : `Item ${itemIndex + 1} de ${units.length}`}</h2>
-        <p>Selecione a imagem correspondente à síntese silábica.</p>
+      <section className="task-meta task-meta-stacked" aria-live="polite">
+        <p className="task-meta-text">
+          {phase === 'TRAINING' ? 'Treino' : 'Prova'} · Síntese silábica
+          {phase === 'TRAINING'
+            ? parts[0] ? ` · ${parts[0]}` : ''
+            : ` · Item ${itemIndex + 1} de ${units.length}`}
+        </p>
+        <p className="task-meta-script">Selecione a imagem correspondente à síntese silábica.</p>
         <div className="synthesis-reference" aria-label="Referência do avaliador">
           <span>Sílabas: <strong>{syllables}</strong></span>
           {showExpectedWord && <span>Resposta esperada: <strong>{targetAnswer}</strong></span>}
@@ -1368,20 +1379,15 @@ function AlphabetStepView({
 
   return (
     <div className="step-view alphabet-step-view">
-      <section className="alphabet-instructions" aria-live="polite">
-        <span className="step-kicker">{phase === 'TRAINING' ? 'Treino' : 'Prova'} · Grupo {groupNumber} de {totalGroups}</span>
-        <h2>
+      <section className="task-meta" aria-live="polite">
+        <p className="task-meta-text">
+          {phase === 'TRAINING' ? 'Treino' : 'Prova'} · Grupo {groupNumber} de {totalGroups}
           {phase === 'TRAINING'
-            ? `${currentUnit?.substep.title ?? 'Conhecimento do alfabeto'} — ${currentExample.split(':')[0]}`
-            : `${currentUnit?.substep.title ?? 'Prova'} — Item ${itemIndex + 1} de ${units.length}`}
-        </h2>
-        <p>
-          {phase === 'TRAINING'
-            ? 'Observe as opções e toque em uma resposta para praticar.'
-            : 'Toque em uma das três opções. O avaliador acompanha a aplicação.'}
+            ? ` · ${currentExample.split(':')[0]}`
+            : ` · Item ${itemIndex + 1} de ${units.length}`}
         </p>
         <button className="audio-question-button" type="button" onClick={speakQuestion}>
-          Ouvir pergunta novamente
+          Ouvir pergunta
         </button>
       </section>
 
