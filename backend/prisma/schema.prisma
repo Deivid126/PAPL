@@ -1,0 +1,215 @@
+// PAPL — Prisma schema
+// O provider é PostgreSQL em produção/desenvolvimento.
+// Os testes utilizam um banco PostgreSQL dedicado (papl_test).
+// Campos de status usam String para manter o schema compatível
+// com a estratégia de testes e facilitar evolução.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String    @id @default(cuid())
+  name            String
+  email           String    @unique
+  passwordHash    String
+  emailVerifiedAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  children                Child[]
+  applications            Application[]
+  refreshTokens           RefreshToken[]
+  emailVerificationTokens EmailVerificationToken[]
+  passwordResetTokens     PasswordResetToken[]
+}
+
+model RefreshToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model MailLog {
+  id        String   @id @default(cuid())
+  to        String
+  subject   String
+  body      String
+  type      String
+  createdAt DateTime @default(now())
+}
+
+model Child {
+  id               String   @id @default(cuid())
+  evaluatorId      String
+  evaluator        User     @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
+  name             String
+  birthDate        DateTime
+  ageAtEvaluation  Int
+  sex              String?
+  school           String?
+  grade            String?
+  notes            String?
+  doesNotRead      Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  applications Application[]
+
+  @@index([evaluatorId])
+  @@index([name])
+}
+
+model Application {
+  id            String    @id @default(cuid())
+  childId       String
+  child         Child     @relation(fields: [childId], references: [id], onDelete: Cascade)
+  evaluatorId   String
+  evaluator     User      @relation(fields: [evaluatorId], references: [id], onDelete: Cascade)
+  status        String    @default("IN_PROGRESS") // DRAFT | IN_PROGRESS | COMPLETED | ARCHIVED
+  startedAt     DateTime  @default(now())
+  completedAt   DateTime?
+  currentStep   Int       @default(1)
+  totalScore    Int?
+  classification String?
+  notes         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  steps ApplicationStep[]
+
+  @@index([evaluatorId])
+  @@index([childId])
+}
+
+model ApplicationStep {
+  id            String        @id @default(cuid())
+  applicationId String
+  application   Application   @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  stepNumber    Int
+  skill         String
+  maxScore      Int?
+  status        String        @default("NOT_STARTED") // NOT_STARTED | IN_PROGRESS | COMPLETED
+  score         Int           @default(0)
+  startedAt     DateTime?
+  completedAt   DateTime?
+  notes         String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  items ApplicationItem[]
+
+  @@unique([applicationId, stepNumber])
+}
+
+model ApplicationItem {
+  id              String          @id @default(cuid())
+  applicationStepId String
+  applicationStep ApplicationStep @relation(fields: [applicationStepId], references: [id], onDelete: Cascade)
+  itemNumber      Int
+  prompt          String?
+  expectedAnswer  String?
+  childAnswer     String?
+  isCorrect       Boolean?
+  score           Int             @default(0)
+  responseTimeMs  Int?
+  notes           String?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@unique([applicationStepId, itemNumber])
+}
+
+// ---- Protocolo (fonte de dados do seed) ----
+
+model ProtocolStep {
+  id           String  @id @default(cuid())
+  stepNumber   Int     @unique
+  title        String
+  skill        String
+  instructions String
+  maxScore     Int?
+  timerRequired Boolean @default(false)
+  position     Int     @default(0)
+
+  substeps ProtocolSubstep[]
+}
+
+model ProtocolSubstep {
+  id              String  @id @default(cuid())
+  stepNumber      Int
+  protocolStep    ProtocolStep @relation(fields: [stepNumber], references: [stepNumber], onDelete: Cascade)
+  order           Int
+  title           String
+  instructions    String
+  trainingExamples String? // JSON: ["exemplo 1", ...]
+  maxScore        Int?
+  timerRequired   Boolean @default(false)
+
+  items ProtocolItem[]
+
+  @@unique([stepNumber, order])
+}
+
+model ProtocolItem {
+  id            String          @id @default(cuid())
+  substepId     String
+  substep       ProtocolSubstep @relation(fields: [substepId], references: [id], onDelete: Cascade)
+  itemNumber    Int
+  prompt        String?
+  expectedAnswer String?
+  imageKey      String? // nome de arquivo no blob storage
+  isPending     Boolean         @default(false) // item do PDF ainda não transcrito
+  responseType  String          @default("TEXT") // LETTER | WORD | SYLLABLE | PHONEME | SENTENCE | TIMED | TEXT
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+
+  @@unique([substepId, itemNumber])
+}
+
+model ClassificationConfig {
+  id             String @id @default(cuid())
+  name           String
+  classification String
+  minScore       Int
+  maxScore       Int
+  description    String?
+  active         Boolean @default(true)
+
+  @@index([active])
+}

@@ -1,0 +1,32 @@
+# Dependências
+node_modules/
+
+# Builds
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Ambiente e segredos
+.env
+.env.local
+.env.*.local
+
+# Banco de dados local / SQLite
+*.db
+*.sqlite
+
+# Arquivos de storage local (blobs de imagens fornecidos pelo usuário)
+backend/storage/
+backend/uploads/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Sistema operacional / editores
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

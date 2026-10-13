@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: papl-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: papl
+      POSTGRES_PASSWORD: papl
+      POSTGRES_DB: papl
+    ports:
+      - "5432:5432"
+    volumes:
+      - papl-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U papl -d papl"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  papl-pgdata:

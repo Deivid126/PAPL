@@ -1,0 +1,9 @@
+# Prisma
+node_modules/
+dist/
+coverage/
+.env
+*.db
+storage/
+test-storage/
+logs/
