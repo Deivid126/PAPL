@@ -13,6 +13,7 @@ import {
   CompleteApplicationDto,
   CreateApplicationDto,
   SaveStepItemDto,
+  SaveStepItemsDto,
   UpdateApplicationDto,
   UpdateStepDto,
 } from './dto/applications.dto';
@@ -197,6 +198,22 @@ export class ApplicationsService {
     this.assertEditable(app);
     const step = await this.getStep(id, stepNumber);
 
+    const item = await this.prisma.applicationItem.upsert(
+      this.itemUpsertArgs(step.id, dto),
+    );
+
+    // autosave: marca a etapa como em andamento e recalcula a pontuação
+    const updatedStep = await this.recomputeStepScore(step.id, stepNumber);
+    return { item, step: updatedStep };
+  }
+
+  /**
+   * Monta os argumentos do upsert de um item.
+   *
+   * Compartilhado por saveItem e saveItems para que a sanitização e o
+   * cálculo da pontuação não possam divergir entre os dois caminhos.
+   */
+  private itemUpsertArgs(applicationStepId: string, dto: SaveStepItemDto) {
     const childAnswer = sanitizeOptional(dto.childAnswer);
     const prompt = sanitizeOptional(dto.prompt);
     const expectedAnswer = sanitizeOptional(dto.expectedAnswer);
@@ -213,15 +230,15 @@ export class ApplicationsService {
             ? 0
             : 0;
 
-    const item = await this.prisma.applicationItem.upsert({
+    return {
       where: {
         applicationStepId_itemNumber: {
-          applicationStepId: step.id,
+          applicationStepId,
           itemNumber: dto.itemNumber,
         },
       },
       create: {
-        applicationStepId: step.id,
+        applicationStepId,
         itemNumber: dto.itemNumber,
         prompt,
         expectedAnswer,
@@ -242,11 +259,35 @@ export class ApplicationsService {
           : {}),
         ...(notes !== undefined ? { notes } : {}),
       },
-    });
+    };
+  }
 
-    // autosave: marca a etapa como em andamento e recalcula a pontuação
+  /**
+   * Grava várias respostas numa única requisição.
+   *
+   * Salvar item a item custava uma ida e volta de rede por item (~255ms
+   * medidos), e a navegação aguardava todas antes de trocar de etapa.
+   * Aqui a verificação de posse, a busca da etapa e o recálculo da
+   * pontuação acontecem uma vez só, e os upserts vão numa transação.
+   */
+  async saveItems(
+    userId: string,
+    id: string,
+    stepNumber: number,
+    dto: SaveStepItemsDto,
+  ) {
+    const app = await this.ensureOwned(userId, id);
+    this.assertEditable(app);
+    const step = await this.getStep(id, stepNumber);
+
+    const items = await this.prisma.$transaction(
+      dto.items.map((item: SaveStepItemDto) =>
+        this.prisma.applicationItem.upsert(this.itemUpsertArgs(step.id, item)),
+      ),
+    );
+
     const updatedStep = await this.recomputeStepScore(step.id, stepNumber);
-    return { item, step: updatedStep };
+    return { items, step: updatedStep };
   }
 
   private async recomputeStepScore(applicationStepId: string, _stepNumber: number) {

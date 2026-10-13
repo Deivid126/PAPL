@@ -17,6 +17,7 @@ import {
   CreateApplicationDto,
   ListApplicationsQueryDto,
   SaveStepItemDto,
+  SaveStepItemsDto,
   UpdateApplicationDto,
   UpdateStepDto,
 } from './dto/applications.dto';
@@ -56,6 +57,22 @@ export class ApplicationsController {
     @Body() dto: UpdateApplicationDto,
   ) {
     return this.applicationsService.update(user.id, id, dto);
+  }
+
+  @Post(':id/steps/:stepNumber/items/batch')
+  @ApiOperation({ summary: 'Salva várias respostas de uma vez (autosave em lote)' })
+  saveItems(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('stepNumber') stepNumber: string,
+    @Body() dto: SaveStepItemsDto,
+  ) {
+    return this.applicationsService.saveItems(
+      user.id,
+      id,
+      Number(stepNumber),
+      dto,
+    );
   }
 
   @Post(':id/steps/:stepNumber/items')

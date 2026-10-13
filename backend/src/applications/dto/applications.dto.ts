@@ -1,5 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
+  ArrayMinSize,
+  IsArray,
   IsBoolean,
   IsIn,
   IsInt,
@@ -8,6 +12,7 @@ import {
   Max,
   MaxLength,
   Min,
+  ValidateNested,
 } from 'class-validator';
 
 export class CreateApplicationDto {
@@ -114,4 +119,19 @@ export class ListApplicationsQueryDto {
   @IsOptional()
   @IsIn(['DRAFT', 'IN_PROGRESS', 'COMPLETED', 'ARCHIVED'])
   status?: string;
+}
+
+export class SaveStepItemsDto {
+  @ApiProperty({
+    type: [SaveStepItemDto],
+    description:
+      'Respostas a gravar de uma vez. Salvar item a item custava uma ' +
+      'ida e volta por item, o que travava a navegação entre as etapas.',
+  })
+  @IsArray()
+  @ArrayMinSize(1, { message: 'Envie ao menos um item.' })
+  @ArrayMaxSize(200, { message: 'Envie no máximo 200 itens por requisição.' })
+  @ValidateNested({ each: true })
+  @Type(() => SaveStepItemDto)
+  items: SaveStepItemDto[];
 }

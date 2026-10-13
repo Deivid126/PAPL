@@ -188,7 +188,7 @@ describe('ApplicationRunPage', () => {
     await waitFor(
       () =>
         expect(apiMocks.api).toHaveBeenCalledWith(
-          '/applications/app1/steps/1/items',
+          '/applications/app1/steps/1/items/batch',
           expect.objectContaining({ method: 'POST' }),
         ),
       { timeout: 3000 },
@@ -200,8 +200,9 @@ describe('ApplicationRunPage', () => {
     apiMocks.api.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url === '/applications/app1') return makeApp(1);
       if (url === '/protocol/steps') return protocolSteps;
-      if (url === '/applications/app1/steps/1/items' && init?.method === 'POST') {
-        itemPosts.push(String(init.body));
+      if (url === '/applications/app1/steps/1/items/batch' && init?.method === 'POST') {
+        const sent = JSON.parse(String(init.body)) as { items: unknown[] };
+        for (const item of sent.items) itemPosts.push(JSON.stringify(item));
         // Latência maior que o debounce de 900ms de queueSave: o timer
         // dispara um segundo flush enquanto o primeiro ainda está na
         // rede. Sem serializar, esse segundo lê savedSignaturesRef antes

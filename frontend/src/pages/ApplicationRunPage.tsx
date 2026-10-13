@@ -277,52 +277,74 @@ export function ApplicationRunPage() {
     if (!app) return;
     const stepNumber = currentStep;
     const latest = statesRef.current;
-    try {
-      for (const unit of units) {
-        const st = latest[String(unit.itemNumber)];
-        if (!st) continue;
-        if (isTimerStep) {
-          if (st.responseTimeMs == null) continue;
-          const signature = JSON.stringify([st.childAnswer, st.isCorrect, st.responseTimeMs, st.notes]);
-          const saveKey = `${stepNumber}:${unit.itemNumber}`;
-          if (savedSignaturesRef.current[saveKey] === signature) continue;
-          await api(`/applications/${app.id}/steps/${stepNumber}/items`, {
-            method: 'POST',
-            body: JSON.stringify({
-              itemNumber: unit.itemNumber,
-              childAnswer: st.childAnswer || undefined,
-              isCorrect: st.isCorrect ?? undefined,
-              responseTimeMs: st.responseTimeMs,
-              notes: st.notes || undefined,
-            }),
-          });
-          savedSignaturesRef.current[saveKey] = signature;
-        } else {
-          const touched =
-            st.childAnswer !== '' ||
-            st.isCorrect !== null ||
-            st.notes !== '' ||
-            st.prompt !== (unit.prompt ?? '') ||
-            st.expectedAnswer !== (unit.expectedAnswer ?? '');
-          if (!touched) continue;
-          const signature = JSON.stringify([st.prompt, st.expectedAnswer, st.childAnswer, st.isCorrect, st.notes]);
-          const saveKey = `${stepNumber}:${unit.itemNumber}`;
-          if (savedSignaturesRef.current[saveKey] === signature) continue;
-          await api(`/applications/${app.id}/steps/${stepNumber}/items`, {
-            method: 'POST',
-            body: JSON.stringify({
-              itemNumber: unit.itemNumber,
-              prompt: st.prompt || undefined,
-              expectedAnswer: st.expectedAnswer || undefined,
-              childAnswer: st.childAnswer || undefined,
-              isCorrect: st.isCorrect ?? undefined,
-              score: st.isCorrect === true ? 1 : st.isCorrect === false ? 0 : undefined,
-              notes: st.notes || undefined,
-            }),
-          });
-          savedSignaturesRef.current[saveKey] = signature;
-        }
+
+    // Monta tudo que mudou e envia numa requisição só. Antes cada item ia
+    // num POST separado, com um await por item: ~255ms de rede vezes o
+    // número de itens da etapa, travando o avanço por vários segundos.
+    const pending: Array<{
+      saveKey: string;
+      signature: string;
+      body: Record<string, unknown>;
+    }> = [];
+
+    for (const unit of units) {
+      const st = latest[String(unit.itemNumber)];
+      if (!st) continue;
+      const saveKey = `${stepNumber}:${unit.itemNumber}`;
+
+      if (isTimerStep) {
+        if (st.responseTimeMs == null) continue;
+        const signature = JSON.stringify([st.childAnswer, st.isCorrect, st.responseTimeMs, st.notes]);
+        if (savedSignaturesRef.current[saveKey] === signature) continue;
+        pending.push({
+          saveKey,
+          signature,
+          body: {
+            itemNumber: unit.itemNumber,
+            childAnswer: st.childAnswer || undefined,
+            isCorrect: st.isCorrect ?? undefined,
+            responseTimeMs: st.responseTimeMs,
+            notes: st.notes || undefined,
+          },
+        });
+      } else {
+        const touched =
+          st.childAnswer !== '' ||
+          st.isCorrect !== null ||
+          st.notes !== '' ||
+          st.prompt !== (unit.prompt ?? '') ||
+          st.expectedAnswer !== (unit.expectedAnswer ?? '');
+        if (!touched) continue;
+        const signature = JSON.stringify([st.prompt, st.expectedAnswer, st.childAnswer, st.isCorrect, st.notes]);
+        if (savedSignaturesRef.current[saveKey] === signature) continue;
+        pending.push({
+          saveKey,
+          signature,
+          body: {
+            itemNumber: unit.itemNumber,
+            prompt: st.prompt || undefined,
+            expectedAnswer: st.expectedAnswer || undefined,
+            childAnswer: st.childAnswer || undefined,
+            isCorrect: st.isCorrect ?? undefined,
+            score: st.isCorrect === true ? 1 : st.isCorrect === false ? 0 : undefined,
+            notes: st.notes || undefined,
+          },
+        });
       }
+    }
+
+    if (pending.length === 0) {
+      setSaving(false);
+      return;
+    }
+
+    try {
+      await api(`/applications/${app.id}/steps/${stepNumber}/items/batch`, {
+        method: 'POST',
+        body: JSON.stringify({ items: pending.map((p) => p.body) }),
+      });
+      // Só marca como salvo depois do aceite do servidor.
+      for (const p of pending) savedSignaturesRef.current[p.saveKey] = p.signature;
       setSaving(false);
       setSavedAt(new Date().toLocaleTimeString('pt-BR'));
     } catch (err) {
