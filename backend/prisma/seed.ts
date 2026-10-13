@@ -278,9 +278,8 @@ async function seedProtocol() {
       order: 3,
       title: '2.3 Identificação de som ou sílaba inicial',
       instructions:
-        'A tela mostra o som ou sílaba inicial para o avaliador ler em voz alta e três figuras sem nome escrito. ' +
-        'A criança toca na figura que começa com aquele som, e o registro de acerto ou erro é automático. ' +
-        'Os distratores saem das demais figuras da subetapa, que têm sons iniciais todos distintos entre si. ' +
+        'A tela mostra a figura, sem o nome escrito, e três letras: a inicial correta e dois distratores. ' +
+        'A criança toca na letra com que a palavra começa, e o registro de acerto ou erro é automático. ' +
         'Pontuação máxima: 21 pontos.',
     },
     {

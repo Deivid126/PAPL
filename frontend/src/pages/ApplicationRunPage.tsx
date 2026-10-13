@@ -1113,23 +1113,31 @@ function SegmentationStepView({
     }));
   }, [isProduction, productionCorrectFile, productionCorrectKey, word]);
 
-  // Identificacao de som ou silaba inicial: a crianca ouve a palavra e
-  // aponta a figura entre tres. O nome nao aparece escrito — num teste de
-  // preditores da leitura, texto na tela confundiria o que se mede.
-  const phonemeCorrectKey = !isPhoneme
+  // Identificacao de som ou silaba inicial: a crianca ve a figura e
+  // escolhe entre tres letras com qual delas a palavra comeca. O nome nao
+  // aparece escrito — num teste de preditores da leitura, ler a palavra
+  // entregaria a resposta.
+  const phonemeImage = !isPhoneme
     ? ''
     : phase === 'TRAINING'
       ? (parts[3] ? `identificacao_fonema/${parts[3]}` : '')
       : (currentUnit?.imageKey ?? '');
 
-  const phonemeOptions = useMemo(() => {
-    if (!isPhoneme || !phonemeCorrectKey) return [];
-    const pool = units
-      .map((u) => u.imageKey ?? '')
-      .filter((key) => key && key !== phonemeCorrectKey);
-    const distractors = shuffled(pool).slice(0, 2);
-    return shuffled([phonemeCorrectKey, ...distractors]).map((imageKey) => ({ imageKey }));
-  }, [isPhoneme, phonemeCorrectKey, units]);
+  // Letra inicial da palavra, sem acento: lapis -> L, robo -> R.
+  const phonemeLetter = !isPhoneme
+    ? ''
+    : (word ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .charAt(0)
+        .toUpperCase();
+
+  const phonemeLetterOptions = useMemo(() => {
+    if (!isPhoneme || !phonemeLetter) return [];
+    const pool = [...VOWELS, ...CONSONANTS].filter((letter) => letter !== phonemeLetter);
+    return shuffled([phonemeLetter, ...shuffled(pool).slice(0, 2)]);
+  }, [isPhoneme, phonemeLetter]);
 
   // Figuras dos exemplos aceitos do treino (ex.: sapo, cinto, sol).
   const EXAMPLE_IMAGES: Record<string, string> = {
@@ -1187,8 +1195,8 @@ function SegmentationStepView({
                 : 'Fale a frase; a criança aponta a figura que completa a frase.'
               : isPhoneme
                 ? phase === 'TRAINING'
-                  ? 'Leia o som em voz alta e peça à criança que toque na figura que começa com ele. Faça os exemplos juntos antes da prova.'
-                  : 'Leia o som em voz alta e peça à criança que toque na figura que começa com ele.'
+                  ? 'Mostre a figura e peça à criança que toque na letra com que a palavra começa. Faça os exemplos juntos antes da prova.'
+                  : 'Peça à criança que toque na letra com que a palavra da figura começa.'
                 : phase === 'TRAINING'
                   ? 'Peça à criança para separar a palavra em sílabas e marque o resultado.'
                   : 'Mostre a imagem e o nome. A criança fala a palavra separada em sílabas e o avaliador marca acerto ou erro.'}
@@ -1281,49 +1289,44 @@ function SegmentationStepView({
         </div>
       )}
 
-      {isPhoneme && (
-        <div className="phoneme-reference" aria-label="Som para o avaliador ler">
-          <span className="segmentation-word-label">Leia para a criança</span>
-          <strong className="phoneme-sound">{syllables}</strong>
+      {isPhoneme && phonemeImage && (
+        <div className="phoneme-stimulus">
+          <img src={storageUrl(phonemeImage)} alt="" />
         </div>
       )}
 
-      {isPhoneme && phonemeOptions.length > 0 && (
-        <div className="synthesis-options production-options" role="group" aria-label="Figuras de resposta">
-          {phonemeOptions.map((option) => {
-            const isCorrectImage = option.imageKey === phonemeCorrectKey;
-            // Verde na figura certa; vermelho so na figura tocada. Pintar
-            // todas as erradas acendia duas de uma vez e escondia qual
-            // delas a crianca escolheu.
-            const stateClass = visitedMark === null
+      {isPhoneme && phonemeLetterOptions.length > 0 && (
+        <div className="alphabet-options phoneme-letter-options" role="group" aria-label="Escolha uma letra">
+          {phonemeLetterOptions.map((letter) => {
+            const correct = letter === phonemeLetter;
+            // Verde na certa; vermelho so na que foi tocada.
+            const stateClass = visitedMark === null || letter !== visitedFile
               ? ''
-              : visitedMark
-                ? (isCorrectImage ? ' selected correct' : '')
-                : (option.imageKey === visitedFile ? ' selected wrong' : '');
+              : correct
+                ? ' selected correct'
+                : ' selected wrong';
             return (
               <button
-                key={option.imageKey}
+                key={letter}
                 type="button"
-                className={`synthesis-option${stateClass}`}
-                aria-label="Figura de resposta"
-                aria-pressed={stateClass !== ''}
+                className={`alphabet-option${stateClass}`}
+                aria-pressed={letter === visitedFile}
                 onClick={() => {
-                  const correct = isCorrectImage;
                   setVisitedMark(correct);
-                  setVisitedFile(option.imageKey);
+                  setVisitedFile(letter);
                   if (phase === 'TRAINING') {
                     setTrainingMark(correct);
                   } else if (currentUnit) {
                     setUnit(currentUnit.itemNumber, {
                       isCorrect: correct,
-                      childAnswer: correct ? word : '',
+                      childAnswer: letter,
                       prompt: syllables,
                       expectedAnswer: word,
                     });
                   }
                 }}
               >
-                <img src={storageUrl(option.imageKey)} alt="" />
+                {letter}
               </button>
             );
           })}
