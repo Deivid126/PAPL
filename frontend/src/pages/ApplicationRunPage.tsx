@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
+import { cancelSpeech, speak } from '../lib/speech';
 import type {
   Application,
   ApplicationItem,
@@ -391,15 +392,48 @@ export function ApplicationRunPage() {
   }
 
   async function handleBack() {
-    if (currentStep <= 1) {
-      navigate('/dashboard');
-      return;
-    }
+    // Voltar anda para tras dentro do teste; quem sai da aplicacao e'
+    // "Salvar e sair". No primeiro item do protocolo nao ha para onde ir.
+    if (currentStep <= 1) return;
     try {
       await flushAll();
       const prev = currentStep - 1;
       setCurrentStep(prev);
       await saveApplicationStep(prev);
+    } catch (err) {
+      setModalError(errorMessage(err));
+    }
+  }
+
+  /**
+   * Retrocede um passo dentro da tarefa atual.
+   *
+   * A ordem espelha a do avanco: item anterior; do inicio da prova para o
+   * ultimo exemplo do treino; e so no inicio do treino e' que a navegacao
+   * cruza para a subetapa anterior, via onStart.
+   */
+  async function stepBack(options: {
+    phase: 'TRAINING' | 'TEST';
+    index: number;
+    trainingCount: number;
+    setPhase: (phase: 'TRAINING' | 'TEST') => void;
+    setIndex: (updater: (index: number) => number) => void;
+    onStart: () => void | Promise<void>;
+  }) {
+    const { phase, index, trainingCount, setPhase, setIndex, onStart } = options;
+    try {
+      if (index > 0) {
+        if (phase === 'TEST') await flushAll();
+        setIndex((current) => current - 1);
+        return;
+      }
+      if (phase === 'TEST') {
+        await flushAll();
+        setPhase('TRAINING');
+        setIndex(() => Math.max(0, trainingCount - 1));
+        return;
+      }
+      await onStart();
     } catch (err) {
       setModalError(errorMessage(err));
     }
@@ -572,7 +606,27 @@ export function ApplicationRunPage() {
             totalGroups={alphabetGroups.length}
             states={states}
             setUnit={setUnit}
-            onBack={handleBack}
+            onBack={() =>
+              stepBack({
+                phase: alphabetPhase,
+                index: alphabetIndex,
+                trainingCount:
+                  (alphabetGroups[alphabetGroup - 1] ?? [])[0]?.substep.trainingExamples.length ?? 0,
+                setPhase: setAlphabetPhase,
+                setIndex: setAlphabetIndex,
+                onStart: async () => {
+                  // Inicio do grupo: volta ao ultimo item do grupo anterior.
+                  if (alphabetGroup > 1) {
+                    const previous = alphabetGroups[alphabetGroup - 2] ?? [];
+                    setAlphabetGroup((group) => group - 1);
+                    setAlphabetPhase('TEST');
+                    setAlphabetIndex(Math.max(0, previous.length - 1));
+                    return;
+                  }
+                  await handleBack();
+                },
+              })
+            }
             onNext={async () => {
               const groupUnits = alphabetGroups[alphabetGroup - 1] ?? [];
               const trainingCount = groupUnits[0]?.substep.trainingExamples.length ?? 0;
@@ -607,7 +661,16 @@ export function ApplicationRunPage() {
             showExpectedWord={Boolean(app.child?.doesNotRead)}
             states={states}
             setUnit={setUnit}
-            onBack={handleBack}
+            onBack={() =>
+              stepBack({
+                phase: synthesisPhase,
+                index: synthesisIndex,
+                trainingCount: synthesisUnits[0]?.substep.trainingExamples.length ?? 0,
+                setPhase: setSynthesisPhase,
+                setIndex: setSynthesisIndex,
+                onStart: handleBack,
+              })
+            }
             onNext={async () => {
               const trainingCount = synthesisUnits[0]?.substep.trainingExamples.length ?? 0;
               if (synthesisPhase === 'TRAINING' && synthesisIndex < trainingCount - 1) {
@@ -639,14 +702,23 @@ export function ApplicationRunPage() {
             units={segmentationUnits}
             states={states}
             setUnit={setUnit}
-            onBack={async () => {
-              if (segmentationPhase === 'TRAINING' && segmentationIndex === 0 && synthesisUnits.length > 0) {
-                await flushAll();
-                setStep2Substep(1);
-                return;
-              }
-              handleBack();
-            }}
+            onBack={() =>
+              stepBack({
+                phase: segmentationPhase,
+                index: segmentationIndex,
+                trainingCount: segmentationUnits[0]?.substep.trainingExamples.length ?? 0,
+                setPhase: setSegmentationPhase,
+                setIndex: setSegmentationIndex,
+                onStart: async () => {
+                  if (synthesisUnits.length > 0) {
+                    await flushAll();
+                    setStep2Substep(1);
+                    return;
+                  }
+                  await handleBack();
+                },
+              })
+            }
             onNext={async () => {
               const trainingCount = segmentationUnits[0]?.substep.trainingExamples.length ?? 0;
               if (segmentationPhase === 'TRAINING' && segmentationIndex < trainingCount - 1) {
@@ -684,14 +756,23 @@ export function ApplicationRunPage() {
             units={phonemeUnits}
             states={states}
             setUnit={setUnit}
-            onBack={async () => {
-              if (phonemePhase === 'TRAINING' && phonemeIndex === 0 && segmentationUnits.length > 0) {
-                await flushAll();
-                setStep2Substep(2);
-                return;
-              }
-              handleBack();
-            }}
+            onBack={() =>
+              stepBack({
+                phase: phonemePhase,
+                index: phonemeIndex,
+                trainingCount: phonemeUnits[0]?.substep.trainingExamples.length ?? 0,
+                setPhase: setPhonemePhase,
+                setIndex: setPhonemeIndex,
+                onStart: async () => {
+                  if (segmentationUnits.length > 0) {
+                    await flushAll();
+                    setStep2Substep(2);
+                    return;
+                  }
+                  await handleBack();
+                },
+              })
+            }
             onNext={async () => {
               const trainingCount = phonemeUnits[0]?.substep.trainingExamples.length ?? 0;
               if (phonemePhase === 'TRAINING' && phonemeIndex < trainingCount - 1) {
@@ -724,14 +805,23 @@ export function ApplicationRunPage() {
             units={productionUnits}
             states={states}
             setUnit={setUnit}
-            onBack={async () => {
-              if (productionPhase === 'TRAINING' && productionIndex === 0 && phonemeUnits.length > 0) {
-                await flushAll();
-                setStep2Substep(3);
-                return;
-              }
-              handleBack();
-            }}
+            onBack={() =>
+              stepBack({
+                phase: productionPhase,
+                index: productionIndex,
+                trainingCount: productionUnits[0]?.substep.trainingExamples.length ?? 0,
+                setPhase: setProductionPhase,
+                setIndex: setProductionIndex,
+                onStart: async () => {
+                  if (phonemeUnits.length > 0) {
+                    await flushAll();
+                    setStep2Substep(3);
+                    return;
+                  }
+                  await handleBack();
+                },
+              })
+            }
             onNext={async () => {
               const trainingCount = productionUnits[0]?.substep.trainingExamples.length ?? 0;
               if (productionPhase === 'TRAINING' && productionIndex < trainingCount - 1) {
@@ -759,13 +849,16 @@ export function ApplicationRunPage() {
             units={units}
             states={states}
             setUnit={setUnit}
-            onBack={async () => {
-              if (comprehensionPhase === 'TRAINING' && comprehensionIndex === 0) {
-                handleBack();
-                return;
-              }
-              handleBack();
-            }}
+            onBack={() =>
+              stepBack({
+                phase: comprehensionPhase,
+                index: comprehensionIndex,
+                trainingCount: units[0]?.substep.trainingExamples.length ?? 0,
+                setPhase: setComprehensionPhase,
+                setIndex: setComprehensionIndex,
+                onStart: handleBack,
+              })
+            }
             onNext={async () => {
               const trainingCount = units[0]?.substep.trainingExamples.length ?? 0;
               if (comprehensionPhase === 'TRAINING' && comprehensionIndex < trainingCount - 1) {
@@ -1342,39 +1435,14 @@ function AlphabetStepView({
     : states[String(currentUnit.itemNumber)]?.childAnswer ?? null;
   const canContinue = selectedAnswer !== null && selectedAnswer !== '';
 
-  // Tablets e celulares só liberam a síntese de fala a partir de um gesto
-  // do usuário, então a chamada automática ao entrar no item é ignorada.
-  // O primeiro toque da sessão destrava o motor com um enunciado mudo, e
-  // a partir daí a leitura automática passa a funcionar também no tablet.
-  useEffect(() => {
-    if (!('speechSynthesis' in window)) return;
-    function prime() {
-      try {
-        const silent = new SpeechSynthesisUtterance('');
-        silent.volume = 0;
-        window.speechSynthesis.speak(silent);
-      } catch {
-        // Sem fala disponível: o botão de ouvir novamente continua valendo.
-      }
-    }
-    document.addEventListener('pointerdown', prime, { once: true, capture: true });
-    return () => document.removeEventListener('pointerdown', prime, { capture: true });
-  }, []);
-
   function speakQuestion() {
-    if (!('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
     const spokenTarget = target === 'E' ? 'É' : target === 'O' ? 'Ó' : target;
-    const utterance = new SpeechSynthesisUtterance(`Onde está a letra ${spokenTarget}?`);
-    utterance.lang = 'pt-BR';
-    utterance.rate = 0.85;
-    utterance.pitch = 1.05;
-    window.speechSynthesis.speak(utterance);
+    speak(`Onde está a letra ${spokenTarget}?`);
   }
 
   useEffect(() => {
     speakQuestion();
-    return () => window.speechSynthesis?.cancel();
+    return cancelSpeech;
   }, [phase, itemIndex]);
 
   return (
@@ -1394,9 +1462,6 @@ function AlphabetStepView({
       <AlphabetChoice
         key={`${phase}-${itemIndex}`}
         unit={choiceUnit}
-        state={phase === 'TRAINING'
-          ? { ...EMPTY_STATE, childAnswer: trainingAnswer ?? '', isCorrect: trainingAnswer ? trainingAnswer === target : null }
-          : states[String(currentUnit.itemNumber)] ?? EMPTY_STATE}
         onChange={(patch) => {
           if (phase === 'TRAINING') {
             setTrainingAnswer(patch.childAnswer ?? null);
@@ -1478,7 +1543,6 @@ function StepView({
             ) : stepNumber === 1 && unit.responseType === 'LETTER' ? (
               <AlphabetChoice
                 unit={unit}
-                state={st}
                 onChange={(patch) => setUnit(unit.itemNumber, patch)}
               />
             ) : (
@@ -1506,11 +1570,9 @@ function StepView({
 
 function AlphabetChoice({
   unit,
-  state,
   onChange,
 }: {
   unit: Unit;
-  state: UnitState;
   onChange: (patch: Partial<UnitState>) => void;
 }) {
   const target = (unit.expectedAnswer ?? '').trim().toUpperCase();
@@ -1520,11 +1582,20 @@ function AlphabetChoice({
     return shuffled([target, ...distractors]);
   }, [pool, target]);
 
+  // A marcação visual é local da visita, não vem da resposta gravada: ao
+  // voltar para um item já respondido, ou ao reentrar na etapa, a tela
+  // aparece limpa. A resposta continua salva, apenas não fica destacada,
+  // para que a criança não seja induzida pela escolha anterior.
+  const [visitAnswer, setVisitAnswer] = useState<string | null>(null);
+  useEffect(() => {
+    setVisitAnswer(null);
+  }, [unit.itemNumber, target]);
+
   return (
     <div className="alphabet-choice" aria-label="Opções de resposta">
       <div className="alphabet-options" role="group" aria-label="Escolha uma letra">
         {options.map((option) => {
-          const selected = state.childAnswer === option;
+          const selected = visitAnswer === option;
           const correct = selected && option === target;
           const wrong = selected && option !== target;
           return (
@@ -1533,7 +1604,10 @@ function AlphabetChoice({
               type="button"
               className={`alphabet-option${selected ? ' selected' : ''}${correct ? ' correct' : ''}${wrong ? ' wrong' : ''}`}
               aria-pressed={selected}
-              onClick={() => onChange({ childAnswer: option, isCorrect: option === target })}
+              onClick={() => {
+                setVisitAnswer(option);
+                onChange({ childAnswer: option, isCorrect: option === target });
+              }}
             >
               {option}
             </button>
