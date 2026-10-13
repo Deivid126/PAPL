@@ -278,9 +278,9 @@ async function seedProtocol() {
       order: 3,
       title: '2.3 Identificação de som ou sílaba inicial',
       instructions:
-        'O avaliador apresenta uma palavra (com figura) e pergunta com qual som ou sílaba ela começa. ' +
-        'A criança responde em voz alta e o avaliador marca acerto ou erro na tela. ' +
-        'Respostas aceitas: som inicial ou sílaba inicial indicadas na tabela. Pontuação máxima: 21 pontos.',
+        'A tela lê a palavra em voz alta e mostra três figuras, sem o nome escrito. ' +
+        'A criança aponta a figura correspondente e o registro de acerto ou erro é automático. ' +
+        'Os distratores saem das demais figuras da subetapa. Pontuação máxima: 21 pontos.',
     },
     {
       order: 4,

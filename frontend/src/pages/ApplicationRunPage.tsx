@@ -1113,6 +1113,24 @@ function SegmentationStepView({
     }));
   }, [isProduction, productionCorrectFile, productionCorrectKey, word]);
 
+  // Identificacao de som ou silaba inicial: a crianca ouve a palavra e
+  // aponta a figura entre tres. O nome nao aparece escrito — num teste de
+  // preditores da leitura, texto na tela confundiria o que se mede.
+  const phonemeCorrectKey = !isPhoneme
+    ? ''
+    : phase === 'TRAINING'
+      ? (parts[3] ? `identificacao_fonema/${parts[3]}` : '')
+      : (currentUnit?.imageKey ?? '');
+
+  const phonemeOptions = useMemo(() => {
+    if (!isPhoneme || !phonemeCorrectKey) return [];
+    const pool = units
+      .map((u) => u.imageKey ?? '')
+      .filter((key) => key && key !== phonemeCorrectKey);
+    const distractors = shuffled(pool).slice(0, 2);
+    return shuffled([phonemeCorrectKey, ...distractors]).map((imageKey) => ({ imageKey }));
+  }, [isPhoneme, phonemeCorrectKey, units]);
+
   // Figuras dos exemplos aceitos do treino (ex.: sapo, cinto, sol).
   const EXAMPLE_IMAGES: Record<string, string> = {
     sapo: 'sapo.png', cinto: 'cinto.png', sol: 'sol.png',
@@ -1127,6 +1145,14 @@ function SegmentationStepView({
     setVisitedMark(null);
     setVisitedFile('');
   }, [phase, itemIndex]);
+
+  // "de <palavra>" em vez de "o/a <palavra>": serve para qualquer genero
+  // sem precisar guardar artigo item a item.
+  useEffect(() => {
+    if (!isPhoneme || !word) return;
+    speak(`Onde esta a figura de ${word}?`);
+    return cancelSpeech;
+  }, [isPhoneme, word, phase, itemIndex]);
 
   if (!currentUnit && phase === 'TEST') return null;
   const canContinue = mark !== null;
@@ -1159,7 +1185,7 @@ function SegmentationStepView({
                 ? 'Fale a frase e mostre a cena. Faça os exemplos juntos antes da prova.'
                 : 'Fale a frase; a criança aponta a figura que completa a frase.'
               : isPhoneme
-                ? 'Fale a palavra e pergunte: "Com qual som ou sílaba ela começa?". A criança responde em voz alta e você marca o resultado.'
+                ? 'A tela lê a palavra em voz alta e mostra três figuras. A criança aponta a figura correspondente.'
                 : phase === 'TRAINING'
                   ? 'Peça à criança para separar a palavra em sílabas e marque o resultado.'
                   : 'Mostre a imagem e o nome. A criança fala a palavra separada em sílabas e o avaliador marca acerto ou erro.'}
@@ -1190,7 +1216,7 @@ function SegmentationStepView({
               </div>
             )}
           </div>
-        ) : isComprehension ? null : (
+        ) : isComprehension || isPhoneme ? null : (
           <div className="segmentation-reference" aria-label="Material apresentado">
             {hasImage && <img src={storageUrl(imageKey)} alt={`Figura da palavra ${word}`} className="segmentation-image" />}
             <div className="segmentation-word">
@@ -1252,6 +1278,48 @@ function SegmentationStepView({
         </div>
       )}
 
+      {isPhoneme && phonemeOptions.length > 0 && (
+        <div className="synthesis-options production-options" role="group" aria-label="Figuras de resposta">
+          {phonemeOptions.map((option) => {
+            const isCorrectImage = option.imageKey === phonemeCorrectKey;
+            // Verde na figura certa; vermelho so na figura tocada. Pintar
+            // todas as erradas acendia duas de uma vez e escondia qual
+            // delas a crianca escolheu.
+            const stateClass = visitedMark === null
+              ? ''
+              : visitedMark
+                ? (isCorrectImage ? ' selected correct' : '')
+                : (option.imageKey === visitedFile ? ' selected wrong' : '');
+            return (
+              <button
+                key={option.imageKey}
+                type="button"
+                className={`synthesis-option${stateClass}`}
+                aria-label="Figura de resposta"
+                aria-pressed={stateClass !== ''}
+                onClick={() => {
+                  const correct = isCorrectImage;
+                  setVisitedMark(correct);
+                  setVisitedFile(option.imageKey);
+                  if (phase === 'TRAINING') {
+                    setTrainingMark(correct);
+                  } else if (currentUnit) {
+                    setUnit(currentUnit.itemNumber, {
+                      isCorrect: correct,
+                      childAnswer: correct ? word : '',
+                      prompt: syllables,
+                      expectedAnswer: word,
+                    });
+                  }
+                }}
+              >
+                <img src={storageUrl(option.imageKey)} alt="" />
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       {isProduction && (
         <div className="synthesis-options production-options" role="group" aria-label="Figuras de apoio">
           {productionOptions.map((option) => {
@@ -1260,11 +1328,14 @@ function SegmentationStepView({
             // cru da opção — então nenhuma resposta era aceita.
             const isCorrectImage = option.imageKey === productionCorrectKey;
             // Marcação visual é local da visita: verde na figura certa, vermelho na errada.
+            // Verde na figura certa; vermelho so na figura tocada. Pintar
+            // todas as erradas acendia duas de uma vez e escondia qual
+            // delas a crianca escolheu.
             const stateClass = visitedMark === null
               ? ''
               : visitedMark
                 ? (isCorrectImage ? ' selected correct' : '')
-                : (isCorrectImage ? '' : ' selected wrong');
+                : (option.imageKey === visitedFile ? ' selected wrong' : '');
             return (
               <button
                 key={option.imageKey}
@@ -1275,6 +1346,7 @@ function SegmentationStepView({
                 onClick={() => {
                   const correct = isCorrectImage;
                   setVisitedMark(correct);
+                  setVisitedFile(option.imageKey);
                   if (phase === 'TRAINING') {
                     setTrainingMark(correct ? true : false);
                   } else {
@@ -1289,7 +1361,10 @@ function SegmentationStepView({
         </div>
       )}
 
-      {!isProduction && !isComprehension && (
+      {/* Onde a crianca responde tocando na figura, o toque ja registra o
+          resultado. Manter tambem a marcacao manual daria duas entradas
+          para a mesma resposta, que poderiam discordar entre si. */}
+      {!isProduction && !isComprehension && !isPhoneme && (
         <div className="correct-row segmentation-mark-row" role="group" aria-label="Marcação de acerto ou erro">
           <button
             type="button"
