@@ -87,8 +87,21 @@ const EMPTY_STATE: UnitState = {
 const VOWELS = ['A', 'E', 'I', 'O', 'U'];
 const CONSONANTS = ['B', 'C', 'D', 'F', 'G', 'J', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'X', 'Z'];
 
+/**
+ * Embaralha de verdade (Fisher-Yates).
+ *
+ * sort(() => Math.random() - 0.5) parece aleatório mas é enviesado: o
+ * comparador é inconsistente e, com poucos itens, a ordem original tende
+ * a sobreviver. Num teste em que a posição da figura certa não pode
+ * carregar informação, esse viés falseia a medida.
+ */
 function shuffled<T>(items: T[]): T[] {
-  return [...items].sort(() => Math.random() - 0.5);
+  const copy = [...items];
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
 }
 
 export function ApplicationRunPage() {
@@ -1092,7 +1105,12 @@ function SegmentationStepView({
     if (!isProduction) return [];
     const entry = PRODUCTION_CHOICES.find((choice) => choice[2] === productionCorrectFile);
     if (!entry) return [{ imageKey: productionCorrectKey, label: word }];
-    return [entry[2], entry[3], entry[4]].map((img) => ({ imageKey: `producao/objetos/${img}`, label: '' }));
+    // A figura certa precisa cair em qualquer das três posições: fixa no
+    // primeiro quadro, a criança acerta pela posição e não pela tarefa.
+    return shuffled([entry[2], entry[3], entry[4]]).map((img) => ({
+      imageKey: `producao/objetos/${img}`,
+      label: '',
+    }));
   }, [isProduction, productionCorrectFile, productionCorrectKey, word]);
 
   // Figuras dos exemplos aceitos do treino (ex.: sapo, cinto, sol).
