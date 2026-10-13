@@ -1855,3 +1855,24 @@ code {
   font-size: 0.85rem;
   color: var(--color-warning);
 }
+
+/* Som da etapa 2.3. É material do avaliador, que lê em voz alta, mas
+   precisa ser legível de pé e a uma certa distância — por isso maior
+   que o restante da faixa, sem competir com as figuras. */
+.phoneme-reference {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  padding: 0.55rem 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  width: fit-content;
+}
+
+.phoneme-sound {
+  font-size: clamp(1.5rem, 4vw, 2.1rem);
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+}

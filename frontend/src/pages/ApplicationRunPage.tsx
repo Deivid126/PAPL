@@ -1146,13 +1146,6 @@ function SegmentationStepView({
     setVisitedFile('');
   }, [phase, itemIndex]);
 
-  // "de <palavra>" em vez de "o/a <palavra>": serve para qualquer genero
-  // sem precisar guardar artigo item a item.
-  useEffect(() => {
-    if (!isPhoneme || !word) return;
-    speak(`Onde esta a figura de ${word}?`);
-    return cancelSpeech;
-  }, [isPhoneme, word, phase, itemIndex]);
 
   if (!currentUnit && phase === 'TEST') return null;
   const canContinue = mark !== null;
@@ -1193,7 +1186,9 @@ function SegmentationStepView({
                 ? 'Fale a frase e mostre a cena. Faça os exemplos juntos antes da prova.'
                 : 'Fale a frase; a criança aponta a figura que completa a frase.'
               : isPhoneme
-                ? 'A tela lê a palavra em voz alta e mostra três figuras. A criança aponta a figura correspondente.'
+                ? phase === 'TRAINING'
+                  ? 'Leia o som em voz alta e peça à criança que toque na figura que começa com ele. Faça os exemplos juntos antes da prova.'
+                  : 'Leia o som em voz alta e peça à criança que toque na figura que começa com ele.'
                 : phase === 'TRAINING'
                   ? 'Peça à criança para separar a palavra em sílabas e marque o resultado.'
                   : 'Mostre a imagem e o nome. A criança fala a palavra separada em sílabas e o avaliador marca acerto ou erro.'}
@@ -1283,6 +1278,13 @@ function SegmentationStepView({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {isPhoneme && (
+        <div className="phoneme-reference" aria-label="Som para o avaliador ler">
+          <span className="segmentation-word-label">Leia para a criança</span>
+          <strong className="phoneme-sound">{syllables}</strong>
         </div>
       )}
 

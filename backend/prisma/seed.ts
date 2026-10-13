@@ -111,25 +111,25 @@ const PHONEME_TRAINING: Array<[string, string, string]> = [
 const PHONEME_ITEMS: Array<[string, string, string]> = [
   ['boca', `/b/ ou /bo/`, 'boca.png'],
   ['peixe', `/p/ ou /pe/ ou /pei/`, 'peixe.png'],
-  ['fita', `/ʃt/ ou /ʃi/`, 'fita.png'],
-  ['zebra', `/i z/ ou /i ze/`, 'zebra.png'],
+  ['fita', `/f/ ou /fi/`, 'fita.png'],
+  ['zebra', `/z/ ou /ze/`, 'zebra.png'],
   ['caju', `/k/ ou /ka/`, 'caju.png'],
   ['vila', `/v/ ou /vi/`, 'vila.png'],
   ['dedo', `/d/ ou /de/`, 'dedo.png'],
   ['galo', `/g/ ou /ga/`, 'galo.png'],
-  ['janela', `/ʒ/ ou /ˈʒa/`, 'janela.png'],
-  ['lápis', `/ˈl/ ou /ˈla/`, 'lapis.png'],
-  ['maçã', `/ˈm/ ou /ˈma/`, 'maca.png'],
-  ['navio', `/ˈn/ ou /ˈna/`, 'navio.png'],
-  ['amora', `/ˈa/`, 'amora.png'],
-  ['ovo', `/ˈo/`, 'ovo.png'],
-  ['elefante', `/ˈe/`, 'elefante.png'],
-  ['igreja', `/ˈi/`, 'igreja.png'],
-  ['urubu', `/ˈu/`, 'urubu.png'],
-  ['robô', `/ˈR/ ou /ˈRo/`, 'robo.png'],
-  ['cipó', `/ˈs/ ou /ˈsi/`, 'cipo.png'],
-  ['tomate', `/ˈt/ ou /ˈto/`, 'tomate.png'],
-  ['xícara', `/ˈʃ/ ou /ˈʃ ˈi/`, 'xicara.png'],
+  ['janela', `/ʒ/ ou /ʒa/`, 'janela.png'],
+  ['lápis', `/l/ ou /la/`, 'lapis.png'],
+  ['maçã', `/m/ ou /ma/`, 'maca.png'],
+  ['navio', `/n/ ou /na/`, 'navio.png'],
+  ['amora', `/a/`, 'amora.png'],
+  ['ovo', `/o/`, 'ovo.png'],
+  ['elefante', `/e/`, 'elefante.png'],
+  ['igreja', `/i/`, 'igreja.png'],
+  ['urubu', `/u/`, 'urubu.png'],
+  ['robô', `/R/ ou /Ro/`, 'robo.png'],
+  ['cipó', `/s/ ou /si/`, 'cipo.png'],
+  ['tomate', `/t/ ou /to/`, 'tomate.png'],
+  ['xícara', `/ʃ/ ou /ʃi/`, 'xicara.png'],
 ] as const;
 
 // Produção de palavras a partir de fonemas e sílabas iniciais (treino + prova).
@@ -278,9 +278,10 @@ async function seedProtocol() {
       order: 3,
       title: '2.3 Identificação de som ou sílaba inicial',
       instructions:
-        'A tela lê a palavra em voz alta e mostra três figuras, sem o nome escrito. ' +
-        'A criança aponta a figura correspondente e o registro de acerto ou erro é automático. ' +
-        'Os distratores saem das demais figuras da subetapa. Pontuação máxima: 21 pontos.',
+        'A tela mostra o som ou sílaba inicial para o avaliador ler em voz alta e três figuras sem nome escrito. ' +
+        'A criança toca na figura que começa com aquele som, e o registro de acerto ou erro é automático. ' +
+        'Os distratores saem das demais figuras da subetapa, que têm sons iniciais todos distintos entre si. ' +
+        'Pontuação máxima: 21 pontos.',
     },
     {
       order: 4,
