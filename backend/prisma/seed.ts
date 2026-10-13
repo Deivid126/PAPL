@@ -398,7 +398,7 @@ async function seedProtocol() {
                   itemNumber: 1,
                   prompt: 'Prancha de prova (35 figuras, 7 linhas).',
                   expectedAnswer: null,
-                  imageKey: 'prancha-prova.png',
+                  imageKey: 'nomeacao_automatica/prancha-prova.png',
                   isPending: false,
                   responseType: 'TIMED',
                 },

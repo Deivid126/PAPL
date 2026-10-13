@@ -1883,3 +1883,62 @@ code {
   min-height: clamp(5rem, 16vh, 9rem);
   font-size: clamp(2.5rem, 9vh, 5rem);
 }
+
+/* Prancha da nomeação automática.
+
+   A imagem é retrato (1120x1620) e a aplicação roda em tablet deitado.
+   Sem limite de tamanho ela estourava a tela nos dois eixos, obrigando a
+   rolar a página no meio de uma tarefa cronometrada — justamente quando
+   a criança precisa varrer as figuras sem interrupção. */
+.prancha-image {
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  margin-inline: auto;
+  border-radius: var(--radius-sm);
+}
+
+.page-run .timer-unit {
+  flex: 1;
+  min-height: 0;
+}
+
+/* O teto precisa ser explicito: dentro de um flex cujo pai nao tem
+   altura limitada, flex:1 nao impede a imagem de crescer. O desconto
+   cobre a faixa do avaliador, o cronometro, as observacoes e a
+   navegacao. */
+.page-run .timer-unit .prancha-image {
+  flex: 0 1 auto;
+  min-height: 0;
+  /* Em retrato os controles ficam abaixo da prancha, e o cronometro
+     precisa estar a mao durante a tarefa: o desconto reserva espaco
+     para eles. Paisagem tem o proprio teto, mais generoso, porque la
+     os controles vao para o lado. */
+  max-height: calc(100dvh - 30rem);
+  width: auto;
+}
+
+/* Em paisagem a prancha é retrato e sobra largura: os controles do
+   avaliador vão para o lado, e a prancha ganha a altura inteira — o que
+   importa numa tarefa em que a criança varre 35 figuras cronometrada. */
+.timer-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+}
+
+/* Vale em paisagem e em retrato: mesmo com 768px de largura cabem a
+   prancha e a coluna de controles, e o cronometro precisa estar visivel
+   enquanto a crianca nomeia. */
+@media (min-width: 700px) {
+  .page-run .timer-unit {
+    display: grid;
+    grid-template-columns: minmax(0, auto) minmax(13rem, 24rem);
+    align-items: start;
+    gap: 1.25rem;
+  }
+
+  .page-run .timer-unit .prancha-image {
+    max-height: calc(100dvh - 18rem);
+  }
+}

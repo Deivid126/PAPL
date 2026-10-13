@@ -1649,7 +1649,9 @@ function StepView({
               {unit.isPending && <span className="badge-pending">Aguardando conferência</span>}
             </div>
 
-            {unit.substep && unit.substep.trainingExamples.length > 0 && (
+            {/* Na etapa cronometrada o exemplo tem fase propria, com a
+                prancha de verdade; a lista crua aqui so repetiria. */}
+            {!isTimer && unit.substep && unit.substep.trainingExamples.length > 0 && (
               <details className="training-box">
                 <summary>Exemplos de treinamento</summary>
                 <ul>
@@ -1843,6 +1845,16 @@ function TimerUnit({
   const [running, setRunning] = useState(false);
   const [elapsed, setElapsed] = useState<number | null>(state.responseTimeMs);
 
+  // A prancha de exemplo serve so para a crianca nomear as figuras, sem
+  // cronometro, como manda o protocolo. Vem dos exemplos de treino da
+  // subetapa, em vez de fixada aqui.
+  const exampleFile = (unit.substep?.trainingExamples?.[0] ?? '').split('|')[3] ?? '';
+  const exampleKey = exampleFile ? `nomeacao_automatica/${exampleFile}` : '';
+  // Quem ja cronometrou volta direto para a prova.
+  const [showExample, setShowExample] = useState(
+    Boolean(exampleKey) && state.responseTimeMs == null,
+  );
+
   useEffect(() => {
     setElapsed(state.responseTimeMs);
   }, [state.responseTimeMs]);
@@ -1872,11 +1884,28 @@ function TimerUnit({
     onChange({ responseTimeMs: ms });
   }
 
+  if (showExample) {
+    return (
+      <div className="timer-unit">
+        <p className="field-hint">
+          Exemplo: peça que a criança nomeie cada figura. Aqui não se marca tempo.
+        </p>
+        <img src={storageUrl(exampleKey)} alt="Prancha de exemplo" className="prancha-image" />
+        <div className="timer-actions">
+          <button className="btn btn-primary" type="button" onClick={() => setShowExample(false)}>
+            Ir para a prova
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="timer-unit">
       {unit.imageKey && (
         <img src={storageUrl(unit.imageKey)} alt="Prancha de figuras" className="prancha-image" />
       )}
+      <div className="timer-controls">
       <div className="timer-display" role="timer" aria-label="Tempo decorrido">
         <IconClock />
         {elapsed != null ? (elapsed / 1000).toFixed(1) : '0.0'} s
@@ -1888,6 +1917,11 @@ function TimerUnit({
         <button className="btn btn-secondary" type="button" onClick={stop} disabled={!running}>
           Finalizar aplicação (cronometrada)
         </button>
+        {exampleKey && !running && (
+          <button className="btn btn-secondary" type="button" onClick={() => setShowExample(true)}>
+            Ver exemplo
+          </button>
+        )}
       </div>
       <div className="field">
         <label className="field-label" htmlFor={`timer-notes-${unit.itemNumber}`}>
@@ -1904,6 +1938,7 @@ function TimerUnit({
       <p className="field-hint">
         O tempo é armazenado em milissegundos e exibido em segundos. Não é convertido em pontuação.
       </p>
+      </div>
     </div>
   );
 }
