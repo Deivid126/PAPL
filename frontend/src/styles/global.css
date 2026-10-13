@@ -1846,3 +1846,12 @@ code {
   flex: 0 1 auto;
   align-content: center;
 }
+
+/* Aviso de voz indisponível: informação operacional para o avaliador,
+   não um erro da aplicação — fica discreto, ao lado do botão de ouvir. */
+.task-meta-alert {
+  margin: 0;
+  flex-basis: 100%;
+  font-size: 0.85rem;
+  color: var(--color-warning);
+}

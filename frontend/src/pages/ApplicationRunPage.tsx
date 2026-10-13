@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
-import { cancelSpeech, speak } from '../lib/speech';
+import { cancelSpeech, speak, speechUnavailable } from '../lib/speech';
 import type {
   Application,
   ApplicationItem,
@@ -1446,9 +1446,18 @@ function AlphabetStepView({
     speak(`Onde está a letra ${spokenTarget}?`);
   }
 
+  // Quando o aparelho nao tem voz em portugues o motor responde
+  // synthesis-failed e nada toca. Sem um aviso, o avaliador acha que
+  // leu para a crianca quando ninguem leu.
+  const [semVoz, setSemVoz] = useState(false);
+
   useEffect(() => {
     speakQuestion();
-    return cancelSpeech;
+    const check = window.setTimeout(() => setSemVoz(speechUnavailable()), 1600);
+    return () => {
+      window.clearTimeout(check);
+      cancelSpeech();
+    };
   }, [phase, itemIndex]);
 
   return (
@@ -1463,6 +1472,11 @@ function AlphabetStepView({
         <button className="audio-question-button" type="button" onClick={speakQuestion}>
           Ouvir pergunta
         </button>
+        {semVoz && (
+          <p className="task-meta-alert" role="status">
+            Este aparelho nao tem voz em portugues: leia a pergunta em voz alta.
+          </p>
+        )}
       </section>
 
       <AlphabetChoice

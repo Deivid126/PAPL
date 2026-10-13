@@ -153,6 +153,26 @@ export function speak(text: string, options: SpeakOptions = {}): void {
   });
 }
 
+/**
+ * Diz se a leitura automática não vai sair neste aparelho.
+ *
+ * Sem voz em português o motor responde synthesis-failed e nada toca.
+ * Não caímos para uma voz de outro idioma de propósito: num instrumento
+ * que mede preditores da leitura, uma letra pronunciada em inglês é pior
+ * que o silêncio — melhor avisar o avaliador para ler em voz alta.
+ */
+export function speechUnavailable(): boolean {
+  if (!supportsSpeech()) return true;
+  if (lastError) return true;
+  try {
+    const voices = window.speechSynthesis.getVoices() ?? [];
+    if (voices.length === 0) return false; // ainda carregando
+    return !voices.some((v) => v.lang?.toLowerCase().startsWith('pt'));
+  } catch {
+    return true;
+  }
+}
+
 /** Resumo do estado da fala no aparelho, para apoio ao diagnóstico. */
 export function describeSpeechSupport(): {
   suportado: boolean;
