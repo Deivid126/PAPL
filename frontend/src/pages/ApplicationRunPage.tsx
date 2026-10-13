@@ -803,8 +803,13 @@ const SYNTHESIS_CHOICES = [
   ['amarelo', 'amarelo.png'], ['macacada', 'macacada.png'], ['perigoso', 'perigoso.png'],
 ] as const;
 
+// Base dos assets do protocolo. Em produção aponta para o Vercel Blob
+// (VITE_STORAGE_URL); em desenvolvimento usa o proxy do Vite para a API.
+const STORAGE_BASE =
+  (import.meta.env.VITE_STORAGE_URL as string | undefined)?.replace(/\/+$/, '') || '/storage';
+
 function storageUrl(key: string): string {
-  return `/storage/${key.split('/').map(encodeURIComponent).join('/')}`;
+  return `${STORAGE_BASE}/${key.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 // Compreensão auditiva: [frase, palavra, arquivo correto, distrator 1, distrator 2]

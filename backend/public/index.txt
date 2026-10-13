@@ -1,0 +1,2 @@
+A API é servida pela função em api/index.js.
+Este diretório existe apenas para satisfazer o outputDirectory da Vercel.

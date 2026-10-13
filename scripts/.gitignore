@@ -1,0 +1,4 @@
+# Segredos locais (token do Blob). Nunca versionar.
+.env.local
+.env
+node_modules/

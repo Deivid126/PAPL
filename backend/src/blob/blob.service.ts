@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createReadStream, existsSync, mkdirSync, statSync } from 'fs';
+import { createReadStream, existsSync, statSync } from 'fs';
 import { mkdir, writeFile } from 'fs/promises';
 import { join, resolve } from 'path';
 import { Readable } from 'stream';
@@ -34,7 +34,9 @@ export class LocalBlobStorage extends BlobStorage {
     super();
     this.dir = resolve(config.get<string>('BLOB_LOCAL_DIR') ?? './storage');
     this.publicBase = config.get<string>('BLOB_PUBLIC_BASE') ?? 'http://localhost:3000';
-    mkdirSync(this.dir, { recursive: true });
+    // O diretório é criado sob demanda em put(), que já usa mkdir recursivo.
+    // Criá-lo aqui quebraria o boot em ambientes de filesystem somente
+    // leitura (serverless), onde este driver sequer é usado.
   }
 
   private safeKey(key: string): string {

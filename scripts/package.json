@@ -1,0 +1,13 @@
+{
+  "name": "papl-scripts",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Utilitários de deploy do PAPL (upload dos assets do protocolo).",
+  "scripts": {
+    "upload-storage": "node upload-storage.mjs"
+  },
+  "dependencies": {
+    "@vercel/blob": "^0.27.0"
+  }
+}
