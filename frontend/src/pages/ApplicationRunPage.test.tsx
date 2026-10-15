@@ -2,6 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { ApplicationRunPage } from './ApplicationRunPage';
+import type { ApplicationItem } from '../lib/types';
 
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({
@@ -141,8 +142,8 @@ function makeApp(stepNumber = 1) {
     updatedAt: '2026-09-01T00:00:00.000Z',
     child: { id: 'c1', name: 'Ana Beatriz', birthDate: '2019-04-12', ageAtEvaluation: 6 },
     steps: [
-      { id: 'as1', applicationId: 'app1', stepNumber: 1, skill: 'conhecimento_alfabeto', maxScore: 23, status: 'IN_PROGRESS', score: 0, startedAt: null, completedAt: null, notes: null, items: [] },
-      { id: 'as2', applicationId: 'app1', stepNumber: 2, skill: 'habilidades_metafonologicas', maxScore: 84, status: 'NOT_STARTED', score: 0, startedAt: null, completedAt: null, notes: null, items: [] },
+      { id: 'as1', applicationId: 'app1', stepNumber: 1, skill: 'conhecimento_alfabeto', maxScore: 23, status: 'IN_PROGRESS', score: 0, startedAt: null, completedAt: null, notes: null, items: [] as ApplicationItem[] },
+      { id: 'as2', applicationId: 'app1', stepNumber: 2, skill: 'habilidades_metafonologicas', maxScore: 84, status: 'NOT_STARTED', score: 0, startedAt: null, completedAt: null, notes: null, items: [] as ApplicationItem[] },
     ],
   };
 }
