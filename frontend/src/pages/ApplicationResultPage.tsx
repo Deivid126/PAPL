@@ -13,6 +13,23 @@ const SKILL_LABELS: Record<string, string> = {
   compreensao_auditiva_sentencas: 'Compreensão auditiva de sentenças',
 };
 
+/**
+ * Na segmentação silábica apresenta-se a palavra e espera-se as sílabas —
+ * o inverso da síntese. As duas gravam nos mesmos campos (prompt e
+ * expectedAnswer), seguindo a convenção da síntese, então aqui a ordem
+ * precisa ser trocada para a tabela não mostrar um no lugar do outro.
+ */
+function apresentadoEEsperado(
+  tituloDaSubetapa: string | undefined,
+  item: { prompt?: string | null; expectedAnswer?: string | null },
+): { apresentado: string; esperado: string } {
+  const apresentado = item.prompt ?? '—';
+  const esperado = item.expectedAnswer ?? '—';
+  return /segmenta/i.test(tituloDaSubetapa ?? '')
+    ? { apresentado: esperado, esperado: apresentado }
+    : { apresentado, esperado };
+}
+
 export function ApplicationResultPage() {
   const { id } = useParams<{ id: string }>();
   const [result, setResult] = useState<ApplicationResult | null>(null);
@@ -190,11 +207,13 @@ export function ApplicationResultPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {sub.items.map((item) => (
+                        {sub.items.map((item) => {
+                          const col = apresentadoEEsperado(sub.title, item);
+                          return (
                           <tr key={item.itemNumber}>
                             <td>{item.itemNumber}</td>
-                            <td>{item.prompt ?? '—'}</td>
-                            <td>{item.expectedAnswer ?? '—'}</td>
+                            <td>{col.apresentado}</td>
+                            <td>{col.esperado}</td>
                             <td>{item.answered ? item.childAnswer || '—' : '—'}</td>
                             <td>
                               {!item.answered ? (
@@ -208,7 +227,8 @@ export function ApplicationResultPage() {
                               )}
                             </td>
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
