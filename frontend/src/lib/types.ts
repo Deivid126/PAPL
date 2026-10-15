@@ -104,6 +104,7 @@ export interface ApplicationItem {
   score: number;
   responseTimeMs: number | null;
   notes: string | null;
+  updatedAt?: string;
 }
 
 export interface ProtocolItem {
@@ -150,6 +151,33 @@ export interface ItemResult {
   notes: string | null;
 }
 
+export interface ProgressItem {
+  itemNumber: number;
+  prompt: string | null;
+  expectedAnswer: string | null;
+  childAnswer: string | null;
+  isCorrect: boolean | null;
+  answered: boolean;
+  notes: string | null;
+}
+
+export interface ProgressExample {
+  label: string;
+  detail: string | null;
+}
+
+export interface ProgressSubstep {
+  order: number;
+  title: string;
+  exampleCount: number;
+  examples: ProgressExample[];
+  totalItems: number;
+  answeredItems: number;
+  correctItems: number;
+  wrongItems: number;
+  items: ProgressItem[];
+}
+
 export interface StepResult {
   stepNumber: number;
   skill: string;
@@ -159,8 +187,10 @@ export interface StepResult {
   completedAt: string | null;
   timerMs: number | null;
   answeredItems: number;
+  totalItems?: number;
   notes: string | null;
   items?: ItemResult[];
+  substeps?: ProgressSubstep[];
 }
 
 export interface ApplicationResult {
@@ -178,6 +208,7 @@ export interface ApplicationResult {
     name: string;
     birthDate: string;
     ageAtEvaluation: number;
+    age?: string;
     school: string | null;
     grade: string | null;
   };

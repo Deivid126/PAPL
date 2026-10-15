@@ -186,6 +186,11 @@ export function DashboardPage() {
                               Continuar aplicação
                             </Link>
                           )}
+                          {last && (
+                            <Link to={`/applications/${last.id}/result`} className="btn btn-ghost btn-sm">
+                              {last.status === 'COMPLETED' ? 'Ver resultado' : 'Ver andamento'}
+                            </Link>
+                          )}
                         </div>
                       </td>
                     </tr>

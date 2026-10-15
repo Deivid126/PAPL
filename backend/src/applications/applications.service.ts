@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { ChildrenService } from '../children/children.service';
 import { ProtocolService } from '../protocol/protocol.service';
 import { sanitizeOptional } from '../common/utils/sanitize.util';
+import { ageDescription } from '../common/utils/age.util';
 import {
   CompleteApplicationDto,
   CreateApplicationDto,
@@ -459,6 +460,7 @@ export class ApplicationsService {
     });
     if (!full) throw new NotFoundException('Aplicação não encontrada.');
 
+    const protocol = await this.protocolService.listSteps();
     const stepResults = full.steps.map((s) => {
       const timerMs =
         s.stepNumber === TIMER_STEP
@@ -467,6 +469,13 @@ export class ApplicationsService {
               0,
             ) || null
           : null;
+      const progress = this.progressForStep(
+        protocol.find((step) => step.stepNumber === s.stepNumber),
+        s.items,
+      );
+      const answeredItems = progress
+        ? progress.substeps.reduce((acc, sub) => acc + sub.answeredItems, 0)
+        : s.items.length;
       return {
         stepNumber: s.stepNumber,
         skill: s.skill,
@@ -475,7 +484,8 @@ export class ApplicationsService {
         maxScore: s.maxScore,
         completedAt: s.completedAt?.toISOString() ?? null,
         timerMs,
-        answeredItems: s.items.length,
+        answeredItems,
+        totalItems: progress?.totalItems ?? s.items.length,
         notes: s.notes,
         items: s.items.map((i) => ({
           itemNumber: i.itemNumber,
@@ -485,6 +495,7 @@ export class ApplicationsService {
           isCorrect: i.isCorrect,
           notes: i.notes,
         })),
+        substeps: progress?.substeps ?? [],
       };
     });
 
@@ -507,6 +518,7 @@ export class ApplicationsService {
         name: full.child.name,
         birthDate: full.child.birthDate.toISOString(),
         ageAtEvaluation: full.child.ageAtEvaluation,
+        age: ageDescription(full.child.birthDate),
         school: full.child.school,
         grade: full.child.grade,
       },
@@ -527,5 +539,88 @@ export class ApplicationsService {
       },
     });
     return { ...child, applications: apps };
+  }
+
+  /**
+   * Cruza o protocolo com as respostas já gravadas.
+   *
+   * O número do item na aplicação é a ordem da prova na etapa (sem os
+   * exemplos). Os exemplos aparecem à parte e não entram em respondidos,
+   * acertos ou pontuação.
+   */
+  private progressForStep(
+    protocolStep:
+      | {
+          substeps: Array<{
+            order: number;
+            title: string;
+            trainingExamples: string[];
+            items: Array<{
+              prompt: string | null;
+              expectedAnswer: string | null;
+            }>;
+          }>;
+        }
+      | undefined,
+    saved: Array<{
+      itemNumber: number;
+      prompt: string | null;
+      expectedAnswer: string | null;
+      childAnswer: string | null;
+      isCorrect: boolean | null;
+      responseTimeMs: number | null;
+      notes: string | null;
+    }>,
+  ) {
+    if (!protocolStep) return null;
+    const savedByNumber = new Map(saved.map((item) => [item.itemNumber, item]));
+    let global = 0;
+    const substeps = protocolStep.substeps.map((sub) => {
+      const examples = sub.trainingExamples.map((raw, index) => this.exampleView(raw, index));
+      const items = sub.items.map((item, index) => {
+        global += 1;
+        const answer = savedByNumber.get(global);
+        const answered = Boolean(
+          answer &&
+            (answer.isCorrect === true ||
+              answer.isCorrect === false ||
+              (answer.childAnswer != null && answer.childAnswer !== '') ||
+              answer.responseTimeMs != null),
+        );
+        return {
+          itemNumber: index + 1,
+          prompt: answer?.prompt ?? item.prompt,
+          expectedAnswer: answer?.expectedAnswer ?? item.expectedAnswer,
+          childAnswer: answered ? answer?.childAnswer ?? null : null,
+          isCorrect: answered ? answer?.isCorrect ?? null : null,
+          answered,
+          notes: answer?.notes ?? null,
+        };
+      });
+      return {
+        order: sub.order,
+        title: sub.title,
+        exampleCount: examples.length,
+        examples,
+        totalItems: items.length,
+        answeredItems: items.filter((item) => item.answered).length,
+        correctItems: items.filter((item) => item.isCorrect === true).length,
+        wrongItems: items.filter((item) => item.isCorrect === false).length,
+        items,
+      };
+    });
+    return {
+      totalItems: substeps.reduce((acc, sub) => acc + sub.totalItems, 0),
+      substeps,
+    };
+  }
+
+  private exampleView(raw: string, index: number) {
+    const parts = raw.split('|').map((part) => part.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      return { label: parts[0] || `Exemplo ${index + 1}`, detail: parts[1] };
+    }
+    const head = raw.split(':')[0]?.trim();
+    return { label: head || `Exemplo ${index + 1}`, detail: null };
   }
 }

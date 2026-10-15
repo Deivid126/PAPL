@@ -55,9 +55,9 @@ export function ApplicationResultPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <h1>Resultado da aplicação</h1>
+          <h1>{result.status === 'COMPLETED' ? 'Resultado da aplicação' : 'Andamento da aplicação'}</h1>
           <p className="page-subtitle">
-            {result.child.name} • {result.child.ageAtEvaluation} anos •{' '}
+            {result.child.name} • {result.child.age ?? `${result.child.ageAtEvaluation} anos`} •{' '}
             {result.completedAt ? new Date(result.completedAt).toLocaleString('pt-BR') : formatDate(result.startedAt)}
           </p>
         </div>
@@ -132,7 +132,9 @@ export function ApplicationResultPage() {
                     <strong>{s.score}</strong>
                     {s.maxScore != null ? ` / ${s.maxScore}` : ''}
                   </td>
-                  <td>{s.answeredItems}</td>
+                  <td>
+                    {s.totalItems != null ? `${s.answeredItems} de ${s.totalItems}` : s.answeredItems}
+                  </td>
                   <td>{s.timerMs != null ? formatTimerMs(s.timerMs) : '—'}</td>
                   <td>{s.status === 'COMPLETED' ? 'Concluída' : s.status}</td>
                 </tr>
@@ -141,12 +143,77 @@ export function ApplicationResultPage() {
           </table>
         </div>
 
-        <details className="item-details">
-          <summary>Respostas detalhadas por item</summary>
+        <div className="item-details">
+          <h2>O que já foi feito</h2>
+          <p className="notes-text">
+            Cada pergunta da prova aparece aqui, respondida ou não. Os exemplos de treino ficam separados e não entram na conta nem na pontuação.
+          </p>
           {result.steps.map((s) => (
             <div className="item-details-step" key={s.stepNumber}>
               <h3>{s.stepNumber}. {SKILL_LABELS[s.skill] ?? s.skill}</h3>
-              {(s.items ?? []).length === 0 ? (
+              {(s.substeps ?? []).length > 0 ? (
+                s.substeps?.map((sub) => (
+                  <div className="progress-substep" key={sub.order}>
+                    <h4>{sub.title}</h4>
+                    <p className="progress-count">
+                      Prova: {sub.answeredItems} de {sub.totalItems} respondidas
+                      {' · '}
+                      {sub.correctItems} {sub.correctItems === 1 ? 'acerto' : 'acertos'}
+                      {' · '}
+                      {sub.wrongItems} {sub.wrongItems === 1 ? 'erro' : 'erros'}
+                      {' · '}
+                      {sub.totalItems - sub.answeredItems} não {sub.totalItems - sub.answeredItems === 1 ? 'respondida' : 'respondidas'}
+                    </p>
+                    {sub.exampleCount > 0 && (
+                      <div className="example-box">
+                        <p>
+                          Treino: {sub.exampleCount} {sub.exampleCount === 1 ? 'exemplo' : 'exemplos'}, contados à parte e sem pontuação.
+                        </p>
+                        <ul>
+                          {sub.examples.map((example) => (
+                            <li key={example.label}>
+                              {example.label}
+                              {example.detail ? ` — ${example.detail}` : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th scope="col">Teste</th>
+                          <th scope="col">Apresentado</th>
+                          <th scope="col">Esperado</th>
+                          <th scope="col">Resposta</th>
+                          <th scope="col">Resultado</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sub.items.map((item) => (
+                          <tr key={item.itemNumber}>
+                            <td>{item.itemNumber}</td>
+                            <td>{item.prompt ?? '—'}</td>
+                            <td>{item.expectedAnswer ?? '—'}</td>
+                            <td>{item.answered ? item.childAnswer || '—' : '—'}</td>
+                            <td>
+                              {!item.answered ? (
+                                <span className="item-pending">Não respondida</span>
+                              ) : item.isCorrect === true ? (
+                                <strong className="item-correct">Acerto</strong>
+                              ) : item.isCorrect === false ? (
+                                <strong className="item-wrong">Erro</strong>
+                              ) : (
+                                <span className="item-pending">Respondida</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))
+              ) : (s.items ?? []).length === 0 ? (
                 <p className="notes-text">Nenhum item registrado.</p>
               ) : (
                 <table className="table">
@@ -182,7 +249,7 @@ export function ApplicationResultPage() {
               )}
             </div>
           ))}
-        </details>
+        </div>
       </section>
 
       {result.notes && (
@@ -194,7 +261,7 @@ export function ApplicationResultPage() {
 
       <div className="page-actions">
         <Link to={`/applications/${id}/run`} className="btn btn-secondary">
-          Reabrir / revisar aplicação
+          {result.status === 'COMPLETED' ? 'Reabrir / revisar aplicação' : 'Continuar de onde parou'}
         </Link>
         <Link to="/dashboard" className="btn btn-primary">
           Voltar ao dashboard

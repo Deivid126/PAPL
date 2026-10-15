@@ -278,4 +278,34 @@ describe('ApplicationRunPage', () => {
 
     await waitFor(() => expect(screen.getByText('Dashboard')).toBeInTheDocument());
   });
+
+  it('reabre no teste salvo por último, sem recomeçar pelos exemplos', async () => {
+    const saved = makeApp(2);
+    saved.steps[0].items = [
+      {
+        id: 'saved-1',
+        applicationStepId: 'as1',
+        itemNumber: 1,
+        prompt: 'A',
+        expectedAnswer: 'A',
+        childAnswer: 'A',
+        isCorrect: true,
+        score: 1,
+        responseTimeMs: null,
+        notes: null,
+        updatedAt: '2026-10-15T12:00:00.000Z',
+      },
+    ];
+    apiMocks.api.mockImplementation(async (url: string) => {
+      if (url === '/applications/app1') return saved;
+      if (url === '/protocol/steps') return protocolSteps;
+      return {};
+    });
+
+    renderRun();
+
+    expect(await screen.findByText(/Item 1 de 2/)).toBeInTheDocument();
+    expect(screen.queryByText(/Exemplo 1/)).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Conhecimento do alfabeto' })).toBeInTheDocument();
+  });
 });

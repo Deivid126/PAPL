@@ -145,14 +145,10 @@ export function ChildDetailPage() {
                         </Link>
                       )}
                       <Link
-                        to={
-                          app.status === 'COMPLETED'
-                            ? `/applications/${app.id}/result`
-                            : `/applications/${app.id}/run`
-                        }
+                        to={`/applications/${app.id}/result`}
                         className="btn btn-ghost btn-sm"
                       >
-                        {app.status === 'COMPLETED' ? 'Ver resultado' : 'Abrir'}
+                        {app.status === 'COMPLETED' ? 'Ver resultado' : 'Ver andamento'}
                       </Link>
                     </div>
                   </div>

@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { CreateChildDto } from './dto/create-child.dto';
 import { UpdateChildDto } from './dto/update-child.dto';
 import { ListChildrenQueryDto } from './dto/list-children-query.dto';
+import { ageDescription, ageInYears } from '../common/utils/age.util';
 
 @Injectable()
 export class ChildrenService {
@@ -253,29 +254,3 @@ export class ChildrenService {
   }
 }
 
-export function ageInYears(birthDate: Date, at: Date): number {
-  let age = at.getFullYear() - birthDate.getFullYear();
-  const m = at.getMonth() - birthDate.getMonth();
-  if (m < 0 || (m === 0 && at.getDate() < birthDate.getDate())) {
-    age--;
-  }
-  return age;
-}
-
-export function ageDescription(birthDate: Date): string {
-  const now = new Date();
-  let years = now.getFullYear() - birthDate.getFullYear();
-  const m = now.getMonth() - birthDate.getMonth();
-  if (m < 0 || (m === 0 && now.getDate() < birthDate.getDate())) {
-    years--;
-  }
-  const monthDiff = (now.getFullYear() - birthDate.getFullYear()) * 12 + (now.getMonth() - birthDate.getMonth());
-  let months = monthDiff;
-  if (now.getDate() < birthDate.getDate()) months--;
-  if (months < 0) months = 0;
-
-  if (years > 0) {
-    return `${years} ano${years > 1 ? 's' : ''} e ${months} mes${months !== 1 ? 'es' : ''}`;
-  }
-  return `${months} mes${months !== 1 ? 'es' : ''}`;
-}

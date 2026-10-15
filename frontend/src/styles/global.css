@@ -1279,6 +1279,39 @@ code {
 
 .item-correct { color: var(--color-success); }
 .item-wrong { color: var(--color-danger); }
+.item-pending { color: var(--color-text-muted); }
+
+.progress-substep {
+  margin-top: 1rem;
+}
+
+.progress-substep h4 {
+  margin: 0 0 0.25rem;
+  font-size: 0.95rem;
+}
+
+.progress-count {
+  margin: 0 0 0.75rem;
+  color: var(--color-text-muted);
+}
+
+.example-box {
+  margin: 0 0 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+}
+
+.example-box p,
+.example-box ul {
+  margin: 0;
+}
+
+.example-box ul {
+  margin-top: 0.35rem;
+  padding-left: 1.1rem;
+}
 
 .alphabet-option {
   min-height: clamp(9rem, 20vh, 13rem);

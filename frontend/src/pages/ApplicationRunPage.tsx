@@ -12,6 +12,7 @@ import type {
 import { Alert, Modal, ProgressBar, Spinner } from '../components/ui';
 import { IconArrowLeft, IconArrowRight, IconClock, IconSave } from '../components/Icons';
 import { formatDate } from '../lib/format';
+import { resumeCursor } from '../lib/resume';
 
 interface Unit {
   itemNumber: number;
@@ -138,6 +139,7 @@ export function ApplicationRunPage() {
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedSignaturesRef = useRef<Record<string, string>>({});
   const flushChainRef = useRef<Promise<void>>(Promise.resolve());
+  const resumeStepRef = useRef<number | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -148,8 +150,37 @@ export function ApplicationRunPage() {
       ]);
       setApp(appRes);
       setProtocol(protocolRes);
-      setCurrentStep(Math.min(Math.max(appRes.currentStep, 1), 5));
-      setStepStatus(appRes.steps?.find((s) => s.stepNumber === appRes.currentStep)?.status ?? 'NOT_STARTED');
+      const cursor = resumeCursor(appRes, protocolRes);
+      if (cursor) {
+        resumeStepRef.current = cursor.stepNumber;
+        setCurrentStep(Math.min(Math.max(cursor.stepNumber, 1), 5));
+        if (cursor.stepNumber === 1) {
+          setAlphabetGroup(cursor.substepOrder);
+          setAlphabetPhase('TEST');
+          setAlphabetIndex(cursor.localIndex);
+        } else if (cursor.stepNumber === 2) {
+          setStep2Substep(Math.min(Math.max(cursor.substepOrder, 1), 4) as 1 | 2 | 3 | 4);
+          if (cursor.substepOrder === 1) {
+            setSynthesisPhase('TEST');
+            setSynthesisIndex(cursor.localIndex);
+          } else if (cursor.substepOrder === 2) {
+            setSegmentationPhase('TEST');
+            setSegmentationIndex(cursor.localIndex);
+          } else if (cursor.substepOrder === 3) {
+            setPhonemePhase('TEST');
+            setPhonemeIndex(cursor.localIndex);
+          } else {
+            setProductionPhase('TEST');
+            setProductionIndex(cursor.localIndex);
+          }
+        } else if (cursor.stepNumber === 4) {
+          setComprehensionPhase('TEST');
+          setComprehensionIndex(cursor.unitIndex);
+        }
+      } else {
+        setCurrentStep(Math.min(Math.max(appRes.currentStep, 1), 5));
+      }
+      setStepStatus(appRes.steps?.find((s) => s.stepNumber === (cursor?.stepNumber ?? appRes.currentStep))?.status ?? 'NOT_STARTED');
       setError(null);
     } catch (err) {
       setError(errorMessage(err));
@@ -163,6 +194,11 @@ export function ApplicationRunPage() {
   }, [load]);
 
   useEffect(() => {
+    if (resumeStepRef.current === currentStep) {
+      resumeStepRef.current = null;
+      return;
+    }
+    resumeStepRef.current = null;
     setAlphabetPhase('TRAINING');
     setAlphabetGroup(1);
     setAlphabetIndex(0);
@@ -596,6 +632,9 @@ export function ApplicationRunPage() {
           <button className="btn btn-secondary" type="button" onClick={handleSaveAndExit}>
             <IconSave /> Salvar e sair
           </button>
+          <Link to={`/applications/${id}/result`} className="btn btn-ghost">
+            Ver andamento
+          </Link>
         </div>
       </header>
 
