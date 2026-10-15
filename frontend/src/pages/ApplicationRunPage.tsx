@@ -605,6 +605,11 @@ export function ApplicationRunPage() {
           <h1>{SKILL_LABELS[currentStepData?.skill ?? ''] ?? `Etapa ${currentStep}`}</h1>
           <p className="page-subtitle">
             {app.child?.name} · Etapa {currentStep} de 4
+            {/* Data da aplicação: vem de startedAt, gravado pelo servidor no
+                momento em que a aplicação é criada. Fica à vista durante o
+                teste, e não só na revisão, para o avaliador conferir que
+                está registrando no dia certo. */}
+            {app.startedAt ? ` · ${formatDate(app.startedAt)}` : ''}
             {currentStepData?.maxScore ? ` · máx ${currentStepData.maxScore} pts` : ''}
           </p>
         </div>

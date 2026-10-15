@@ -1986,7 +1986,7 @@ code {
 
 .comprehension-scene {
   max-width: 100%;
-  max-height: min(31vh, 17rem);
+  max-height: min(26vh, 14rem);
   height: auto;
   object-fit: contain;
   border-radius: var(--radius-sm);
