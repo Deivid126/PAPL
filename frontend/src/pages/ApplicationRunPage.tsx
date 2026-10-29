@@ -6,6 +6,7 @@ import type {
   Application,
   ApplicationItem,
   ApplicationResult,
+  ApplicationSection,
   ProtocolStep,
   ProtocolSubstep,
 } from '../lib/types';
@@ -13,6 +14,8 @@ import { Alert, Modal, ProgressBar, Spinner } from '../components/ui';
 import { IconArrowLeft, IconArrowRight, IconClock, IconSave } from '../components/Icons';
 import { formatDate } from '../lib/format';
 import { resumeCursor } from '../lib/resume';
+import { circleCountForPrompt, isCorrectSyllableSelection } from '../lib/syllableCircles';
+import { deriveSectionState } from '../lib/sectionProgress';
 
 interface Unit {
   itemNumber: number;
@@ -129,6 +132,7 @@ export function ApplicationRunPage() {
   const [comprehensionIndex, setComprehensionIndex] = useState(0);
   const [step2Substep, setStep2Substep] = useState<1 | 2 | 3 | 4>(1);
   const [states, setStates] = useState<Record<string, UnitState>>({});
+  const [sectionStates, setSectionStates] = useState<Record<string, ApplicationSection>>({});
   const statesRef = useRef(states);
   statesRef.current = states;
   const [saving, setSaving] = useState(false);
@@ -150,31 +154,36 @@ export function ApplicationRunPage() {
       ]);
       setApp(appRes);
       setProtocol(protocolRes);
+      setSectionStates(Object.fromEntries(
+        (appRes.steps ?? []).flatMap((step) =>
+          (step.sections ?? []).map((section) => [`${step.stepNumber}:${section.substepOrder}`, section]),
+        ),
+      ));
       const cursor = resumeCursor(appRes, protocolRes);
       if (cursor) {
         resumeStepRef.current = cursor.stepNumber;
         setCurrentStep(Math.min(Math.max(cursor.stepNumber, 1), 5));
         if (cursor.stepNumber === 1) {
           setAlphabetGroup(cursor.substepOrder);
-          setAlphabetPhase('TEST');
+          setAlphabetPhase(cursor.phase ?? 'TEST');
           setAlphabetIndex(cursor.localIndex);
         } else if (cursor.stepNumber === 2) {
           setStep2Substep(Math.min(Math.max(cursor.substepOrder, 1), 4) as 1 | 2 | 3 | 4);
           if (cursor.substepOrder === 1) {
-            setSynthesisPhase('TEST');
+            setSynthesisPhase(cursor.phase ?? 'TEST');
             setSynthesisIndex(cursor.localIndex);
           } else if (cursor.substepOrder === 2) {
-            setSegmentationPhase('TEST');
+            setSegmentationPhase(cursor.phase ?? 'TEST');
             setSegmentationIndex(cursor.localIndex);
           } else if (cursor.substepOrder === 3) {
-            setPhonemePhase('TEST');
+            setPhonemePhase(cursor.phase ?? 'TEST');
             setPhonemeIndex(cursor.localIndex);
           } else {
-            setProductionPhase('TEST');
+            setProductionPhase(cursor.phase ?? 'TEST');
             setProductionIndex(cursor.localIndex);
           }
         } else if (cursor.stepNumber === 4) {
-          setComprehensionPhase('TEST');
+          setComprehensionPhase(cursor.phase ?? 'TEST');
           setComprehensionIndex(cursor.unitIndex);
         }
       } else {
@@ -258,12 +267,19 @@ export function ApplicationRunPage() {
 
   // Destinos de navegação rápida: cada subetapa do protocolo + revisão.
   const jumpTargets = useMemo(() => {
-    const targets: Array<{ stepNumber: number; substepOrder: number | null; label: string }> = [];
+    const targets: Array<{
+      stepNumber: number;
+      substepOrder: number | null;
+      label: string;
+      section?: ApplicationSection;
+    }> = [];
     for (const step of protocol) {
       for (const sub of step.substeps) {
+        const section = sectionStates[`${step.stepNumber}:${sub.order}`];
         targets.push({
           stepNumber: step.stepNumber,
           substepOrder: sub.order,
+          section,
           label: `${step.stepNumber}.${sub.order} ${sub.title.replace(/^\d+\.\d+\s*/, '')}`,
         });
       }
@@ -271,7 +287,7 @@ export function ApplicationRunPage() {
     targets.sort((a, b) => a.stepNumber - b.stepNumber || (a.substepOrder ?? 0) - (b.substepOrder ?? 0));
     targets.push({ stepNumber: 5, substepOrder: null, label: 'Revisão e finalização' });
     return targets;
-  }, [protocol]);
+  }, [protocol, sectionStates]);
 
   // Inicializa os estados locais quando o step/application carrega
   useEffect(() => {
@@ -292,11 +308,33 @@ export function ApplicationRunPage() {
   }, [app, currentStepData, units, currentStep]);
 
   function setUnit(itemNumber: number, patch: Partial<UnitState>) {
-    setStates((prev) => {
-      const cur = prev[String(itemNumber)] ?? itemToState(undefined);
-      return { ...prev, [String(itemNumber)]: { ...cur, ...patch } };
-    });
+    const targetUnit = units.find((unit) => unit.itemNumber === itemNumber);
+    const section = targetUnit
+      ? sectionStates[`${currentStep}:${targetUnit.substep.order}`]
+      : undefined;
+    if (section?.status === 'FINALIZED') {
+      setModalError('Esta seção já foi finalizada nesta aplicação.');
+      return;
+    }
+    const key = String(itemNumber);
+    const current = statesRef.current;
+    const cur = current[key] ?? itemToState(undefined);
+    const updated = { ...current, [key]: { ...cur, ...patch } };
+    // Keep flushes triggered in the same interaction on the exact state just submitted.
+    statesRef.current = updated;
+    setStates(updated);
     queueSave();
+  }
+
+  function sectionIsFinalized(sectionUnits: Unit[]): boolean {
+    const order = sectionUnits[0]?.substep.order;
+    if (order == null) return false;
+    const saved = sectionStates[`${currentStep}:${order}`];
+    if (saved?.status === 'FINALIZED') return true;
+    const answers = sectionUnits.map((unit) =>
+      statesRef.current[String(unit.itemNumber)] ?? EMPTY_STATE,
+    );
+    return deriveSectionState(answers).status === 'FINALIZED';
   }
 
   function queueSave() {
@@ -395,10 +433,21 @@ export function ApplicationRunPage() {
     }
 
     try {
-      await api(`/applications/${app.id}/steps/${stepNumber}/items/batch`, {
-        method: 'POST',
-        body: JSON.stringify({ items: pending.map((p) => p.body) }),
-      });
+      const saved = await api<{ sections?: ApplicationSection[] }>(
+        `/applications/${app.id}/steps/${stepNumber}/items/batch`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ items: pending.map((p) => p.body) }),
+        },
+      );
+      if (saved.sections) {
+        setSectionStates((current) => ({
+          ...current,
+          ...Object.fromEntries(
+            saved.sections!.map((section) => [`${stepNumber}:${section.substepOrder}`, section]),
+          ),
+        }));
+      }
       // Só marca como salvo depois do aceite do servidor.
       for (const p of pending) savedSignaturesRef.current[p.saveKey] = p.signature;
       setSaving(false);
@@ -543,7 +592,18 @@ export function ApplicationRunPage() {
 
   // Salta para uma subetapa: entra na prova no primeiro item sem resposta
   // quando a subetapa já tem respostas salvas; senão, começa no treino.
-  async function jumpTo(target: { stepNumber: number; substepOrder: number | null }) {
+  async function jumpTo(target: {
+    stepNumber: number;
+    substepOrder: number | null;
+    section?: ApplicationSection;
+  }) {
+    const section = target.substepOrder == null
+      ? undefined
+      : sectionStates[`${target.stepNumber}:${target.substepOrder}`];
+    if (section?.status === 'FINALIZED' || target.section?.status === 'FINALIZED') {
+      setModalError('Esta seção já foi finalizada nesta aplicação.');
+      return;
+    }
     try {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       await flushAll();
@@ -628,8 +688,17 @@ export function ApplicationRunPage() {
                 Parte...
               </option>
               {jumpTargets.map((target, i) => (
-                <option key={`${target.stepNumber}-${target.substepOrder}`} value={i}>
+                <option
+                  key={`${target.stepNumber}-${target.substepOrder}`}
+                  value={i}
+                  disabled={target.section?.status === 'FINALIZED'}
+                >
                   {target.label}
+                  {target.section?.status === 'FINALIZED'
+                    ? target.section.finalizedReason === 'ERROR_LIMIT'
+                      ? ' · Encerrada após 5 erros'
+                      : ' · Finalizada'
+                    : target.section?.status === 'IN_PROGRESS' ? ' · Em andamento' : ''}
                 </option>
               ))}
             </select>
@@ -702,6 +771,17 @@ export function ApplicationRunPage() {
                 setAlphabetIndex(0);
                 return;
               }
+              if (sectionIsFinalized(groupUnits)) {
+                await flushAll();
+                if (alphabetGroup < alphabetGroups.length) {
+                  setAlphabetGroup((group) => group + 1);
+                  setAlphabetPhase('TRAINING');
+                  setAlphabetIndex(0);
+                } else {
+                  requestNext();
+                }
+                return;
+              }
               if (alphabetIndex < groupUnits.length - 1) {
                 void flushAll();
                 setAlphabetIndex((index) => index + 1);
@@ -743,6 +823,12 @@ export function ApplicationRunPage() {
               if (synthesisPhase === 'TRAINING') {
                 setSynthesisPhase('TEST');
                 setSynthesisIndex(0);
+                return;
+              }
+              if (sectionIsFinalized(synthesisUnits)) {
+                await flushAll();
+                if (segmentationUnits.length > 0) setStep2Substep(2);
+                else requestNext();
                 return;
               }
               if (synthesisIndex < synthesisUnits.length - 1) {
@@ -791,6 +877,13 @@ export function ApplicationRunPage() {
               if (segmentationPhase === 'TRAINING') {
                 setSegmentationPhase('TEST');
                 setSegmentationIndex(0);
+                return;
+              }
+              if (sectionIsFinalized(segmentationUnits)) {
+                await flushAll();
+                if (phonemeUnits.length > 0) setStep2Substep(3);
+                else if (productionUnits.length > 0) setStep2Substep(4);
+                else requestNext();
                 return;
               }
               if (segmentationIndex < segmentationUnits.length - 1) {
@@ -847,6 +940,12 @@ export function ApplicationRunPage() {
                 setPhonemeIndex(0);
                 return;
               }
+              if (sectionIsFinalized(phonemeUnits)) {
+                await flushAll();
+                if (productionUnits.length > 0) setStep2Substep(4);
+                else requestNext();
+                return;
+              }
               if (phonemeIndex < phonemeUnits.length - 1) {
                 void flushAll();
                 setPhonemeIndex((index) => index + 1);
@@ -896,6 +995,11 @@ export function ApplicationRunPage() {
                 setProductionIndex(0);
                 return;
               }
+              if (sectionIsFinalized(productionUnits)) {
+                await flushAll();
+                requestNext();
+                return;
+              }
               if (productionIndex < productionUnits.length - 1) {
                 void flushAll();
                 setProductionIndex((index) => index + 1);
@@ -931,6 +1035,11 @@ export function ApplicationRunPage() {
               if (comprehensionPhase === 'TRAINING') {
                 setComprehensionPhase('TEST');
                 setComprehensionIndex(0);
+                return;
+              }
+              if (sectionIsFinalized(units)) {
+                await flushAll();
+                requestNext();
                 return;
               }
               if (comprehensionIndex < units.length - 1) {
@@ -1087,6 +1196,7 @@ function SegmentationStepView({
   // é sempre local da visita atual — ao avançar/voltar, o item volta desmarcado.
   const [visitedMark, setVisitedMark] = useState<boolean | null>(null);
   const [visitedFile, setVisitedFile] = useState<string>('');
+  const [selectedSyllableCircles, setSelectedSyllableCircles] = useState<number[]>([]);
   const isPhoneme = mode === 'phoneme';
   const isProduction = mode === 'production';
   const isComprehension = mode === 'comprehension';
@@ -1106,6 +1216,10 @@ function SegmentationStepView({
   const imageKey = phase === 'TRAINING' && parts[3] ? `${storageDir}/${parts[3]}` : currentUnit?.imageKey ?? '';
   const hasImage = imageKey !== '';
   const mark = phase === 'TRAINING' ? trainingMark : states[String(currentUnit?.itemNumber)]?.isCorrect ?? null;
+  const isSyllableChoice = mode === 'segmentation' && phase === 'TEST';
+  const syllableCircleCount = isSyllableChoice ? circleCountForPrompt(syllables) : 0;
+  const savedChildAnswer = states[String(currentUnit?.itemNumber)]?.childAnswer ?? '';
+  const savedCircleCount = Number.parseInt(savedChildAnswer, 10);
 
   // Produção: prompts de treino trazem "sapo, cinto, sol..." — separa para exibir e usa a 1ª como alvo.
   const productionExamples = isProduction && phase === 'TRAINING' ? (parts[2] ?? '').split(',').map((s) => s.trim()) : [];
@@ -1211,11 +1325,19 @@ function SegmentationStepView({
     setTrainingMark(null);
     setVisitedMark(null);
     setVisitedFile('');
-  }, [phase, itemIndex]);
+    const restoredCount = Number.isInteger(savedCircleCount) && savedCircleCount > 0
+      ? Math.min(savedCircleCount, syllableCircleCount)
+      : 0;
+    setSelectedSyllableCircles(
+      isSyllableChoice ? Array.from({ length: restoredCount }, (_, index) => index) : [],
+    );
+  }, [phase, itemIndex, isSyllableChoice, savedCircleCount, syllableCircleCount]);
 
 
   if (!currentUnit && phase === 'TEST') return null;
-  const canContinue = mark !== null;
+  const canContinue = isSyllableChoice
+    ? selectedSyllableCircles.length > 0
+    : mark !== null;
   // Letra/sílaba grande: fonemas simples usam a pasta letras (A-Z); sílabas aparecem como texto.
   const promptLetter = isProduction ? (syllables.match(/\/([^/]+)\//)?.[1] ?? '') : '';
   const IPA_TO_LETTER: Record<string, string> = {
@@ -1256,9 +1378,11 @@ function SegmentationStepView({
                 ? phase === 'TRAINING'
                   ? 'Mostre a figura e peça à criança que toque na letra com que a palavra começa. Faça os exemplos juntos antes da prova.'
                   : 'Peça à criança que toque na letra com que a palavra da figura começa.'
-                : phase === 'TRAINING'
-                  ? 'Peça à criança para separar a palavra em sílabas e marque o resultado.'
-                  : 'Mostre a imagem e o nome. A criança fala a palavra separada em sílabas e o avaliador marca acerto ou erro.'}
+                : isSyllableChoice
+                  ? 'Toque em um círculo para cada sílaba da palavra.'
+                  : phase === 'TRAINING'
+                    ? 'Peça à criança para separar a palavra em sílabas e marque o resultado.'
+                    : 'Mostre a imagem e o nome. A criança fala a palavra separada em sílabas e o avaliador marca acerto ou erro.'}
         </p>
         {isProduction ? (
           <div className="production-reference">
@@ -1287,12 +1411,23 @@ function SegmentationStepView({
             )}
           </div>
         ) : isComprehension || isPhoneme ? null : (
-          <div className="segmentation-reference" aria-label="Material apresentado">
-            {hasImage && <img src={storageUrl(imageKey)} alt={`Figura da palavra ${word}`} className="segmentation-image" />}
-            <div className="segmentation-word">
-              <span className="segmentation-word-label">{isPhoneme ? 'Respostas aceitas' : 'Palavra'}</span>
+          <div
+            className={`segmentation-reference${isSyllableChoice ? ' segmentation-reference-child-choice' : ''}`}
+            aria-label={isSyllableChoice ? 'Imagem e referência do avaliador' : 'Material apresentado'}
+          >
+            {hasImage && (
+              <img
+                src={storageUrl(imageKey)}
+                alt={isSyllableChoice ? '' : `Figura da palavra ${word}`}
+                className="segmentation-image"
+              />
+            )}
+            <div className={`segmentation-word${isSyllableChoice ? ' segmentation-evaluator-word' : ''}`}>
+              <span className="segmentation-word-label">
+                {isSyllableChoice ? 'Referência do avaliador' : isPhoneme ? 'Respostas aceitas' : 'Palavra'}
+              </span>
               <strong>{word}</strong>
-              <span className="segmentation-syllables">{syllables}</span>
+              {!isSyllableChoice && <span className="segmentation-syllables">{syllables}</span>}
             </div>
           </div>
         )}
@@ -1435,10 +1570,30 @@ function SegmentationStepView({
         </div>
       )}
 
-      {/* Onde a crianca responde tocando na figura, o toque ja registra o
-          resultado. Manter tambem a marcacao manual daria duas entradas
-          para a mesma resposta, que poderiam discordar entre si. */}
-      {!isProduction && !isComprehension && !isPhoneme && (
+      {isSyllableChoice && syllableCircleCount > 0 && (
+        <div className="syllable-circle-choices" role="group" aria-label="Separação em sílabas">
+          {Array.from({ length: syllableCircleCount }, (_, index) => {
+            const selected = selectedSyllableCircles.includes(index);
+            return (
+              <button
+                key={index}
+                type="button"
+                className={`syllable-circle-button${selected ? ' selected' : ''}`}
+                aria-label={`Sílaba ${index + 1}`}
+                aria-pressed={selected}
+                onClick={() => setSelectedSyllableCircles((current) =>
+                  current.includes(index)
+                    ? current.filter((circle) => circle !== index)
+                    : [...current, index],
+                )}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      {/* Na prova de segmentação a criança responde tocando nos círculos; o avaliador não marca manualmente. */}
+      {!isProduction && !isComprehension && !isPhoneme && !isSyllableChoice && (
         <div className="correct-row segmentation-mark-row" role="group" aria-label="Marcação de acerto ou erro">
           <button
             type="button"
@@ -1465,7 +1620,18 @@ function SegmentationStepView({
 
       <div className="step-nav">
         <button className="btn btn-secondary" type="button" onClick={onBack}><IconArrowLeft /> Voltar</button>
-        <button className="btn btn-primary" type="button" onClick={onNext} disabled={!canContinue}>
+        <button className="btn btn-primary" type="button" onClick={() => {
+          if (isSyllableChoice && currentUnit) {
+            const selectedCount = selectedSyllableCircles.length;
+            setUnit(currentUnit.itemNumber, {
+              childAnswer: String(selectedCount),
+              isCorrect: isCorrectSyllableSelection(selectedCount, syllables),
+              prompt: syllables,
+              expectedAnswer: word,
+            });
+          }
+          void onNext();
+        }} disabled={!canContinue}>
           {phase === 'TRAINING' ? itemIndex < examples.length - 1 ? 'Próximo exemplo' : 'Ir para a prova' : itemIndex < units.length - 1 ? 'Prosseguir' : 'Concluir etapa'}
           <IconArrowRight />
         </button>
@@ -1504,12 +1670,21 @@ function SynthesisStepView({
     ? trainingAnswer
     : states[String(currentUnit?.itemNumber)]?.childAnswer ?? null;
   const options = useMemo(() => {
-    const distractors = SYNTHESIS_CHOICES
-      .filter(([, image]) => `sintese_silabica/${image}` !== targetImage)
-      .sort(() => Math.random() - 0.5)
+    const asksForYellow = targetAnswer.trim().toLocaleLowerCase('pt-BR') === 'amarelo';
+    // shuffled() e' Fisher-Yates. sort(() => Math.random() - 0.5) parece
+    // aleatorio mas usa um comparador inconsistente: medido em 60 mil
+    // sorteios de tres opcoes, a resposta certa caia 43% a esquerda,
+    // 19% ao centro e 38% a direita. Num teste em que a posicao nao pode
+    // carregar informacao, isso falseia a medida.
+    const candidatos = SYNTHESIS_CHOICES.filter(([, image]) => {
+      const isTarget = `sintese_silabica/${image}` === targetImage;
+      const isYellowHair = asksForYellow && image === 'cabelo.png';
+      return !isTarget && !isYellowHair;
+    });
+    const distractors = shuffled(candidatos)
       .slice(0, 2)
       .map(([answer, image]) => ({ answer, imageKey: `sintese_silabica/${image}` }));
-    return [...distractors, { answer: targetAnswer, imageKey: targetImage }].sort(() => Math.random() - 0.5);
+    return shuffled([...distractors, { answer: targetAnswer, imageKey: targetImage }]);
   }, [targetAnswer, targetImage]);
 
   useEffect(() => {

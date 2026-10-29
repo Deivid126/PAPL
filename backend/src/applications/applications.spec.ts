@@ -5,6 +5,7 @@ import {
   createChild,
   createApplication,
   createTestingApp,
+  prismaFrom,
   registerAndLogin,
 } from '../../test/utils';
 
@@ -67,6 +68,10 @@ describe('Applications', () => {
     app = await createTestingApp();
   });
 
+  afterEach(async () => {
+    await prismaFrom(app).protocolStep.deleteMany({ where: { stepNumber: 99 } });
+  });
+
   afterAll(async () => {
     await app.close();
   });
@@ -84,6 +89,97 @@ describe('Applications', () => {
     expect(res.body.steps).toHaveLength(4);
     expect(res.body.steps.map((s: any) => s.stepNumber)).toEqual([1, 2, 3, 4]);
     expect(res.body.currentStep).toBe(1);
+  });
+
+  it('mantém o estado de cada seção por aplicação e finaliza ao completar ou atingir cinco erros consecutivos', async () => {
+    const prisma = prismaFrom(app);
+    const stepNumber = 99;
+    await prisma.protocolStep.deleteMany({ where: { stepNumber } });
+    await prisma.protocolStep.create({
+      data: {
+        stepNumber,
+        title: 'Etapa de teste',
+        skill: 'teste',
+        instructions: '',
+        substeps: {
+          create: [
+            {
+              order: 1,
+              title: 'Seção completa',
+              instructions: '',
+              trainingExamples: JSON.stringify([]),
+              items: {
+                create: [1, 2].map((itemNumber) => ({
+                  itemNumber,
+                  isPending: false,
+                  responseType: 'TEXT',
+                })),
+              },
+            },
+            {
+              order: 2,
+              title: 'Seção interrompida',
+              instructions: '',
+              trainingExamples: JSON.stringify([]),
+              items: {
+                create: Array.from({ length: 6 }, (_, index) => ({
+                  itemNumber: index + 1,
+                  isPending: false,
+                  responseType: 'TEXT',
+                })),
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    const user = await registerAndLogin(app);
+    const child = await createChild(app, user.accessToken);
+    const app1 = await createApplication(app, user.accessToken, child.id);
+    const initialStep = app1.steps.find((s: any) => s.stepNumber === stepNumber);
+    expect(initialStep.substeps.map((section: any) => section.status)).toEqual([
+      'NOT_STARTED',
+      'NOT_STARTED',
+    ]);
+    const secondApplication = await createApplication(app, user.accessToken, child.id);
+    const secondStep = secondApplication.steps.find((s: any) => s.stepNumber === stepNumber);
+    expect(secondStep.substeps.map((section: any) => section.status)).toEqual([
+      'NOT_STARTED',
+      'NOT_STARTED',
+    ]);
+
+    await saveItem(app, user.accessToken, app1.id, stepNumber, 1, { correct: false });
+    let detail = await request(app.getHttpServer())
+      .get(`/applications/${app1.id}`)
+      .set(auth(user.accessToken))
+      .expect(200);
+    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).substeps[0].status)
+      .toBe('IN_PROGRESS');
+
+    await saveItem(app, user.accessToken, app1.id, stepNumber, 2, { correct: true });
+    detail = await request(app.getHttpServer())
+      .get(`/applications/${app1.id}`)
+      .set(auth(user.accessToken))
+      .expect(200);
+    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).substeps[0]).toMatchObject({
+      status: 'FINALIZED',
+      finalizedReason: 'ALL_ITEMS_ANSWERED',
+    });
+
+    for (let itemNumber = 3; itemNumber <= 7; itemNumber += 1) {
+      await saveItem(app, user.accessToken, app1.id, stepNumber, itemNumber, { correct: false });
+    }
+    detail = await request(app.getHttpServer())
+      .get(`/applications/${app1.id}`)
+      .set(auth(user.accessToken))
+      .expect(200);
+    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).substeps[1]).toMatchObject({
+      status: 'FINALIZED',
+      finalizedReason: 'ERROR_LIMIT',
+    });
+    await saveItem(app, user.accessToken, app1.id, stepNumber, 8, { correct: true })
+      .then((res) => expect(res.status).toBe(403));
   });
 
   it('isola aplicações entre avaliadores', async () => {

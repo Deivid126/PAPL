@@ -2,7 +2,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { ApplicationRunPage } from './ApplicationRunPage';
-import type { ApplicationItem } from '../lib/types';
+import type { Application, ApplicationItem, ProtocolStep } from '../lib/types';
 
 vi.mock('../auth/AuthContext', () => ({
   useAuth: () => ({
@@ -126,7 +126,7 @@ const protocolSteps = [
   },
 ];
 
-function makeApp(stepNumber = 1) {
+function makeApp(stepNumber = 1): Application {
   return {
     id: 'app1',
     childId: 'c1',
@@ -142,8 +142,8 @@ function makeApp(stepNumber = 1) {
     updatedAt: '2026-09-01T00:00:00.000Z',
     child: { id: 'c1', name: 'Ana Beatriz', birthDate: '2019-04-12', ageAtEvaluation: 6 },
     steps: [
-      { id: 'as1', applicationId: 'app1', stepNumber: 1, skill: 'conhecimento_alfabeto', maxScore: 23, status: 'IN_PROGRESS', score: 0, startedAt: null, completedAt: null, notes: null, items: [] as ApplicationItem[] },
-      { id: 'as2', applicationId: 'app1', stepNumber: 2, skill: 'habilidades_metafonologicas', maxScore: 84, status: 'NOT_STARTED', score: 0, startedAt: null, completedAt: null, notes: null, items: [] as ApplicationItem[] },
+      { id: 'as1', applicationId: 'app1', stepNumber: 1, skill: 'conhecimento_alfabeto', maxScore: 23, status: 'IN_PROGRESS', score: 0, startedAt: null, completedAt: null, notes: null, sections: [], items: [] as ApplicationItem[] },
+      { id: 'as2', applicationId: 'app1', stepNumber: 2, skill: 'habilidades_metafonologicas', maxScore: 84, status: 'NOT_STARTED', score: 0, startedAt: null, completedAt: null, notes: null, sections: [], items: [] as ApplicationItem[] },
     ],
   };
 }
@@ -162,6 +162,160 @@ function renderRun() {
 describe('ApplicationRunPage', () => {
   beforeEach(() => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
+  });
+
+  it('identifica e impede navegar para uma seção finalizada nesta aplicação', async () => {
+    const saved = makeApp(1);
+    saved.steps![0].sections = [{
+      id: 'section-vowels',
+      applicationStepId: 'as1',
+      substepOrder: 1,
+      status: 'FINALIZED',
+      finalizedReason: 'ERROR_LIMIT',
+      consecutiveErrors: 5,
+      startedAt: '2026-10-01T00:00:00.000Z',
+      finalizedAt: '2026-10-01T00:01:00.000Z',
+    }];
+    apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
+      if (url === '/applications/app1') return saved;
+      if (url === '/protocol/steps') return protocolSteps;
+      return {};
+    });
+
+    renderRun();
+
+    const jumpSelect = await screen.findByLabelText('Ir para');
+    const finalizedOption = within(jumpSelect).getByRole('option', { name: /1\.1 Vogais · Encerrada após 5 erros/ });
+    expect(finalizedOption).toBeDisabled();
+  });
+
+  it('não oferece cabelo como distrator quando o alvo é a cor amarela', async () => {
+    let randomState = 27;
+    const randomSpy = vi.spyOn(Math, 'random').mockImplementation(() => {
+      randomState = (randomState * 1664525 + 1013904223) >>> 0;
+      return randomState / 4294967296;
+    });
+    const saved = makeApp(2);
+    saved.steps![1].items = [{
+      id: 'saved-yellow',
+      applicationStepId: 'as2',
+      itemNumber: 1,
+      prompt: '/a/ /ma/ /re/ /lo/',
+      expectedAnswer: 'amarelo',
+      childAnswer: '',
+      isCorrect: false,
+      score: 0,
+      responseTimeMs: null,
+      notes: null,
+      updatedAt: '2026-10-01T00:01:00.000Z',
+    }];
+    const protocolWithYellow = structuredClone(protocolSteps) as ProtocolStep[];
+    protocolWithYellow[1].substeps[0].items = [{
+      id: 'yellow-item',
+      substepId: 'ps2',
+      itemNumber: 1,
+      prompt: '/a/ /ma/ /re/ /lo/',
+      expectedAnswer: 'amarelo',
+      imageKey: 'sintese_silabica/amarelo.png',
+      isPending: false,
+      responseType: 'WORD',
+    }];
+    apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
+      if (url === '/applications/app1') return saved;
+      if (url === '/protocol/steps') return protocolWithYellow;
+      return {};
+    });
+
+    try {
+      renderRun();
+      const choiceGroup = await screen.findByRole('group', { name: 'Imagens de resposta' });
+      const imageSources = Array.from(choiceGroup.querySelectorAll('img')).map((image) => image.getAttribute('src') ?? '');
+      expect(imageSources).toHaveLength(3);
+      expect(imageSources.some((src) => src.includes('cabelo.png'))).toBe(false);
+    } finally {
+      randomSpy.mockRestore();
+    }
+  });
+
+  it('mostra círculos por sílaba e salva a quantidade selecionada pela criança', async () => {
+    const saved = makeApp(2);
+    const segmentationPrompt = `/"va/ -/ka/`;
+    saved.steps![1].sections = [{
+      id: 'section-segmentation',
+      applicationStepId: 'as2',
+      substepOrder: 2,
+      status: 'IN_PROGRESS',
+      finalizedReason: null,
+      consecutiveErrors: 0,
+      startedAt: '2026-10-01T00:00:00.000Z',
+      finalizedAt: null,
+    }];
+    saved.steps![1].items = [{
+      id: 'saved-vaca',
+      applicationStepId: 'as2',
+      itemNumber: 1,
+      prompt: segmentationPrompt,
+      expectedAnswer: 'vaca',
+      childAnswer: '0',
+      isCorrect: false,
+      score: 0,
+      responseTimeMs: null,
+      notes: null,
+      updatedAt: '2026-10-01T00:01:00.000Z',
+    }];
+    const segmentationProtocol = structuredClone(protocolSteps) as ProtocolStep[];
+    segmentationProtocol[1].substeps = [{
+      id: 'ps-segmentation',
+      stepNumber: 2,
+      order: 2,
+      title: '2.2 Segmentação silábica',
+      instructions: '',
+      trainingExamples: [],
+      maxScore: 21,
+      timerRequired: false,
+      items: [{
+        id: 'item-vaca',
+        substepId: 'ps-segmentation',
+        itemNumber: 1,
+        prompt: segmentationPrompt,
+        expectedAnswer: 'vaca',
+        imageKey: 'segmentacao_silabica/vaca.png',
+        isPending: false,
+        responseType: 'SYLLABLE',
+      }],
+    }];
+    apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
+      if (url === '/applications/app1') return saved;
+      if (url === '/protocol/steps') return segmentationProtocol;
+      return {};
+    });
+
+    renderRun();
+
+    const circleGroup = await screen.findByRole('group', { name: 'Separação em sílabas' });
+    const circles = within(circleGroup).getAllByRole('button');
+    expect(circles).toHaveLength(3);
+    expect(screen.getByText('vaca')).toBeInTheDocument();
+    expect(screen.queryByText(segmentationPrompt)).not.toBeInTheDocument();
+
+    fireEvent.click(circles[0]);
+    fireEvent.click(circles[1]);
+    expect(within(circleGroup).getAllByRole('button').filter((circle) => circle.getAttribute('aria-pressed') === 'true')).toHaveLength(2);
+    fireEvent.click(screen.getByRole('button', { name: /Concluir etapa/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /Confirmar e prosseguir/ }));
+
+    await waitFor(() => expect(apiMocks.api).toHaveBeenCalledWith(
+      '/applications/app1/steps/2/items/batch',
+      expect.objectContaining({ method: 'POST' }),
+    ));
+    const batchCall = apiMocks.api.mock.calls.find(([url]) => url === '/applications/app1/steps/2/items/batch');
+    const payload = JSON.parse(String(batchCall?.[1]?.body)) as { items: Array<Record<string, unknown>> };
+    expect(payload.items[0]).toMatchObject({
+      itemNumber: 1,
+      childAnswer: '2',
+      expectedAnswer: 'vaca',
+      isCorrect: true,
+    });
   });
 
   it('exibe os itens da etapa 1 e salva respostas', async () => {
@@ -282,7 +436,7 @@ describe('ApplicationRunPage', () => {
 
   it('reabre no teste salvo por último, sem recomeçar pelos exemplos', async () => {
     const saved = makeApp(2);
-    saved.steps[0].items = [
+    saved.steps![0].items = [
       {
         id: 'saved-1',
         applicationStepId: 'as1',

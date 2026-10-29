@@ -30,6 +30,48 @@ const DEFAULT_STEPS: Array<{ stepNumber: number; skill: string; maxScore: number
   { stepNumber: 5, skill: 'compreensao_auditiva_sentencas', maxScore: 20 },
 ];
 
+const SECTION_ERROR_LIMIT = 5;
+type SectionStatus = 'NOT_STARTED' | 'IN_PROGRESS' | 'FINALIZED';
+type SectionFinalizedReason = 'ALL_ITEMS_ANSWERED' | 'ERROR_LIMIT';
+
+function deriveSectionState(
+  answers: Array<{ isCorrect: boolean | null; childAnswer: string | null; responseTimeMs: number | null }>,
+  totalItems: number,
+): { status: SectionStatus; finalizedReason: SectionFinalizedReason | null; consecutiveErrors: number } {
+  let consecutiveErrors = 0;
+  let answeredCount = 0;
+
+  for (const answer of answers) {
+    const answered =
+      answer.isCorrect !== null ||
+      (answer.childAnswer !== null && answer.childAnswer !== '') ||
+      answer.responseTimeMs !== null;
+    if (answered) answeredCount += 1;
+
+    if (answer.isCorrect === false) {
+      consecutiveErrors += 1;
+      if (consecutiveErrors >= SECTION_ERROR_LIMIT) {
+        return {
+          status: 'FINALIZED',
+          finalizedReason: 'ERROR_LIMIT',
+          consecutiveErrors: SECTION_ERROR_LIMIT,
+        };
+      }
+    } else {
+      consecutiveErrors = 0;
+    }
+  }
+
+  if (totalItems > 0 && answeredCount === totalItems) {
+    return { status: 'FINALIZED', finalizedReason: 'ALL_ITEMS_ANSWERED', consecutiveErrors: 0 };
+  }
+  return {
+    status: answeredCount > 0 ? 'IN_PROGRESS' : 'NOT_STARTED',
+    finalizedReason: null,
+    consecutiveErrors,
+  };
+}
+
 @Injectable()
 export class ApplicationsService {
   constructor(
@@ -67,6 +109,125 @@ export class ApplicationsService {
     return step;
   }
 
+  private async ensureSections(applicationStepId: string, stepNumber: number) {
+    const protocolStep = (await this.protocolService.listSteps()).find(
+      (step) => step.stepNumber === stepNumber,
+    );
+    if (!protocolStep) return null;
+
+    const existingCount = await this.prisma.applicationSection.count({
+      where: { applicationStepId },
+    });
+    await this.prisma.applicationSection.createMany({
+      data: protocolStep.substeps.map((substep) => ({
+        applicationStepId,
+        substepOrder: substep.order,
+        status: 'NOT_STARTED',
+      })),
+      skipDuplicates: true,
+    });
+    if (existingCount === 0) {
+      await this.syncSectionStates(applicationStepId, protocolStep);
+    }
+    return protocolStep;
+  }
+
+  private async assertSectionOpen(
+    applicationStepId: string,
+    protocolStep: Awaited<ReturnType<ProtocolService['listSteps']>>[number] | null,
+    itemNumber: number,
+  ) {
+    if (!protocolStep) return;
+    let globalItemNumber = 0;
+    for (const substep of protocolStep.substeps) {
+      const first = globalItemNumber + 1;
+      globalItemNumber += substep.items.length;
+      if (itemNumber < first || itemNumber > globalItemNumber) continue;
+
+      const section = await this.prisma.applicationSection.findUnique({
+        where: {
+          applicationStepId_substepOrder: {
+            applicationStepId,
+            substepOrder: substep.order,
+          },
+        },
+      });
+      if (section?.status === 'FINALIZED') {
+        throw new ForbiddenException('Esta seção já foi finalizada nesta aplicação.');
+      }
+      return;
+    }
+  }
+
+  private async syncSectionStates(
+    applicationStepId: string,
+    protocolStep: Awaited<ReturnType<ProtocolService['listSteps']>>[number] | null,
+  ) {
+    if (!protocolStep) return;
+    const [sections, savedItems] = await Promise.all([
+      this.prisma.applicationSection.findMany({ where: { applicationStepId } }),
+      this.prisma.applicationItem.findMany({
+        where: { applicationStepId },
+        orderBy: { itemNumber: 'asc' },
+        select: { itemNumber: true, isCorrect: true, childAnswer: true, responseTimeMs: true },
+      }),
+    ]);
+    const sectionByOrder = new Map(sections.map((section) => [section.substepOrder, section]));
+    const itemByNumber = new Map(savedItems.map((item) => [item.itemNumber, item]));
+    let globalItemNumber = 0;
+
+    for (const substep of protocolStep.substeps) {
+      const answers = substep.items.map(() => itemByNumber.get(++globalItemNumber) ?? {
+        isCorrect: null,
+        childAnswer: null,
+        responseTimeMs: null,
+      });
+      const current = sectionByOrder.get(substep.order);
+      if (current?.status === 'FINALIZED') continue;
+
+      const derived = deriveSectionState(answers, substep.items.length);
+      const now = new Date();
+      await this.prisma.applicationSection.upsert({
+        where: {
+          applicationStepId_substepOrder: {
+            applicationStepId,
+            substepOrder: substep.order,
+          },
+        },
+        create: {
+          applicationStepId,
+          substepOrder: substep.order,
+          status: derived.status,
+          finalizedReason: derived.finalizedReason,
+          consecutiveErrors: derived.consecutiveErrors,
+          ...(derived.status !== 'NOT_STARTED' ? { startedAt: now } : {}),
+          ...(derived.status === 'FINALIZED' ? { finalizedAt: now } : {}),
+        },
+        update: {
+          status: derived.status,
+          finalizedReason: derived.finalizedReason,
+          consecutiveErrors: derived.consecutiveErrors,
+          ...(derived.status !== 'NOT_STARTED' && !current?.startedAt ? { startedAt: now } : {}),
+          finalizedAt: derived.status === 'FINALIZED' ? now : null,
+        },
+      });
+    }
+  }
+
+  private async ensureSectionsForApplication(applicationId: string) {
+    const protocolSteps = await this.protocolService.listSteps();
+    const applicationSteps = await this.prisma.applicationStep.findMany({
+      where: { applicationId },
+      select: { id: true, stepNumber: true },
+    });
+    for (const applicationStep of applicationSteps) {
+      const protocolStep = protocolSteps.find((step) => step.stepNumber === applicationStep.stepNumber);
+      if (protocolStep) {
+        await this.ensureSections(applicationStep.id, applicationStep.stepNumber);
+      }
+    }
+  }
+
   // ---------- criação / listagem ----------
 
   async create(userId: string, dto: CreateApplicationDto) {
@@ -77,7 +238,11 @@ export class ApplicationsService {
       skill: string;
       maxScore?: number | null;
       timerRequired?: boolean;
-      substeps?: { maxScore?: number | null; items: { isPending?: boolean }[] }[];
+      substeps?: {
+        order: number;
+        maxScore?: number | null;
+        items: { isPending?: boolean }[];
+      }[];
     }> = protocolSteps.length > 0 ? protocolSteps : DEFAULT_STEPS;
 
     const app = await this.prisma.application.create({
@@ -94,10 +259,21 @@ export class ApplicationsService {
             skill: step.skill,
             maxScore: step.timerRequired ? null : this.stepMaxScoreFromProtocol(step),
             status: 'NOT_STARTED',
+            sections: {
+              create: (step.substeps ?? []).map((substep) => ({
+                substepOrder: substep.order,
+                status: 'NOT_STARTED',
+              })),
+            },
           })),
         },
       },
-      include: { steps: { orderBy: { stepNumber: 'asc' } } },
+      include: {
+        steps: {
+          orderBy: { stepNumber: 'asc' },
+          include: { sections: { orderBy: { substepOrder: 'asc' } } },
+        },
+      },
     });
     return app;
   }
@@ -150,6 +326,7 @@ export class ApplicationsService {
 
   async findOne(userId: string, id: string) {
     await this.ensureOwned(userId, id);
+    await this.ensureSectionsForApplication(id);
     const full = await this.prisma.application.findUnique({
       where: { id },
       include: {
@@ -158,6 +335,7 @@ export class ApplicationsService {
           orderBy: { stepNumber: 'asc' },
           include: {
             items: { orderBy: { itemNumber: 'asc' } },
+            sections: { orderBy: { substepOrder: 'asc' } },
           },
         },
       },
@@ -198,14 +376,21 @@ export class ApplicationsService {
     const app = await this.ensureOwned(userId, id);
     this.assertEditable(app);
     const step = await this.getStep(id, stepNumber);
+    const protocolStep = await this.ensureSections(step.id, stepNumber);
+    await this.assertSectionOpen(step.id, protocolStep, dto.itemNumber);
 
     const item = await this.prisma.applicationItem.upsert(
       this.itemUpsertArgs(step.id, dto),
     );
 
-    // autosave: marca a etapa como em andamento e recalcula a pontuação
+    // autosave: atualiza a etapa e o estado persistido da seção desta sessão.
     const updatedStep = await this.recomputeStepScore(step.id, stepNumber);
-    return { item, step: updatedStep };
+    await this.syncSectionStates(step.id, protocolStep);
+    const sections = await this.prisma.applicationSection.findMany({
+      where: { applicationStepId: step.id },
+      orderBy: { substepOrder: 'asc' },
+    });
+    return { item, step: updatedStep, sections };
   }
 
   /**
@@ -280,6 +465,10 @@ export class ApplicationsService {
     const app = await this.ensureOwned(userId, id);
     this.assertEditable(app);
     const step = await this.getStep(id, stepNumber);
+    const protocolStep = await this.ensureSections(step.id, stepNumber);
+    for (const item of dto.items) {
+      await this.assertSectionOpen(step.id, protocolStep, item.itemNumber);
+    }
 
     const items = await this.prisma.$transaction(
       dto.items.map((item: SaveStepItemDto) =>
@@ -288,7 +477,12 @@ export class ApplicationsService {
     );
 
     const updatedStep = await this.recomputeStepScore(step.id, stepNumber);
-    return { items, step: updatedStep };
+    await this.syncSectionStates(step.id, protocolStep);
+    const sections = await this.prisma.applicationSection.findMany({
+      where: { applicationStepId: step.id },
+      orderBy: { substepOrder: 'asc' },
+    });
+    return { items, step: updatedStep, sections };
   }
 
   private async recomputeStepScore(applicationStepId: string, _stepNumber: number) {
@@ -433,19 +627,35 @@ export class ApplicationsService {
         'Apenas aplicações finalizadas podem ser reabertas.',
       );
     }
-    return this.prisma.application.update({
-      where: { id },
-      data: {
-        status: 'IN_PROGRESS',
-        completedAt: null,
-        totalScore: null,
-        classification: null,
-      },
-    });
+    const [updated] = await this.prisma.$transaction([
+      this.prisma.application.update({
+        where: { id },
+        data: {
+          status: 'IN_PROGRESS',
+          completedAt: null,
+          totalScore: null,
+          classification: null,
+        },
+      }),
+      this.prisma.applicationSection.updateMany({
+        where: {
+          applicationStep: { applicationId: id },
+          status: 'FINALIZED',
+        },
+        data: {
+          status: 'IN_PROGRESS',
+          finalizedReason: null,
+          consecutiveErrors: 0,
+          finalizedAt: null,
+        },
+      }),
+    ]);
+    return updated;
   }
 
   async result(userId: string, id: string) {
     await this.ensureOwned(userId, id);
+    await this.ensureSectionsForApplication(id);
     const full = await this.prisma.application.findUnique({
       where: { id },
       include: {
@@ -454,6 +664,7 @@ export class ApplicationsService {
           orderBy: { stepNumber: 'asc' },
           include: {
             items: { orderBy: { itemNumber: 'asc' } },
+            sections: { orderBy: { substepOrder: 'asc' } },
           },
         },
       },
@@ -495,7 +706,15 @@ export class ApplicationsService {
           isCorrect: i.isCorrect,
           notes: i.notes,
         })),
-        substeps: progress?.substeps ?? [],
+        substeps: progress?.substeps.map((substep) => {
+          const section = s.sections.find((candidate) => candidate.substepOrder === substep.order);
+          return {
+            ...substep,
+            status: section?.status ?? 'NOT_STARTED',
+            finalizedReason: section?.finalizedReason ?? null,
+            consecutiveErrors: section?.consecutiveErrors ?? 0,
+          };
+        }) ?? [],
       };
     });
 

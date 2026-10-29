@@ -7,6 +7,8 @@ export interface ResumeCursor {
   localIndex: number;
   /** Posição entre os itens oficiais da etapa inteira. */
   unitIndex: number;
+  /** Quando a última seção foi finalizada, a próxima pode ainda estar no treino. */
+  phase?: 'TRAINING' | 'TEST';
 }
 
 function isSavedAnswer(item: ApplicationItem): boolean {
@@ -18,12 +20,17 @@ function isSavedAnswer(item: ApplicationItem): boolean {
   );
 }
 
+function isSectionFinalized(app: Application, stepNumber: number, substepOrder: number): boolean {
+  return app.steps
+    ?.find((step) => step.stepNumber === stepNumber)
+    ?.sections?.find((section) => section.substepOrder === substepOrder)
+    ?.status === 'FINALIZED';
+}
+
 /**
- * Volta para o item oficial salvo por último.
- *
- * O número gravado segue a ordem da prova (1, 2, 3...), sem os exemplos.
- * Se há 4 testes e o terceiro foi o último salvo, a volta cai nele — não
- * no exemplo e não no teste seguinte.
+ * Retoma no último item salvo enquanto sua seção continua aberta. Se a seção
+ * foi finalizada, posiciona na primeira seção ainda ativa da sessão, sem
+ * reabrir itens encerrados nem contabilizar os exemplos de treino.
  */
 export function resumeCursor(app: Application, protocol: ProtocolStep[]): ResumeCursor | null {
   let best: { at: string; stepNumber: number; itemNumber: number } | null = null;
@@ -48,18 +55,64 @@ export function resumeCursor(app: Application, protocol: ProtocolStep[]): Resume
   }
 
   let global = 0;
+  let savedSubstep: (typeof protocolStep.substeps)[number] | undefined;
+  let savedLocalIndex = 0;
   for (const sub of protocolStep.substeps) {
     for (let index = 0; index < sub.items.length; index += 1) {
       global += 1;
-      if (global !== best.itemNumber) continue;
-      return {
-        stepNumber: best.stepNumber,
-        substepOrder: sub.order,
-        localIndex: index,
-        unitIndex: global - 1,
-      };
+      if (global === best.itemNumber) {
+        savedSubstep = sub;
+        savedLocalIndex = index;
+        break;
+      }
     }
+    if (savedSubstep) break;
   }
 
-  return { stepNumber: best.stepNumber, substepOrder: protocolStep.substeps[0]?.order ?? 1, localIndex: 0, unitIndex: 0 };
+  if (!savedSubstep) {
+    return {
+      stepNumber: best.stepNumber,
+      substepOrder: protocolStep.substeps[0]?.order ?? 1,
+      localIndex: 0,
+      unitIndex: 0,
+    };
+  }
+  if (!isSectionFinalized(app, best.stepNumber, savedSubstep.order)) {
+    return {
+      stepNumber: best.stepNumber,
+      substepOrder: savedSubstep.order,
+      localIndex: savedLocalIndex,
+      unitIndex: best.itemNumber - 1,
+    };
+  }
+
+  const orderedSections = protocol
+    .flatMap((step) => step.substeps.map((substep) => ({ step, substep })))
+    .sort((a, b) => a.step.stepNumber - b.step.stepNumber || a.substep.order - b.substep.order);
+  for (const candidate of orderedSections) {
+    if (isSectionFinalized(app, candidate.step.stepNumber, candidate.substep.order)) continue;
+
+    let candidateStart = 0;
+    for (const previous of candidate.step.substeps) {
+      if (previous.order === candidate.substep.order) break;
+      candidateStart += previous.items.length;
+    }
+    const savedItems = app.steps?.find((step) => step.stepNumber === candidate.step.stepNumber)?.items ?? [];
+    const savedByNumber = new Map(savedItems.map((item) => [item.itemNumber, item]));
+    const answers = candidate.substep.items.map((_, index) => savedByNumber.get(candidateStart + index + 1));
+    const hasAnswers = answers.some((item) => item != null && isSavedAnswer(item));
+    const firstUnanswered = answers.findIndex((item) => !item || !isSavedAnswer(item));
+    const phase = hasAnswers ? 'TEST' : 'TRAINING';
+    const localIndex = phase === 'TEST' && firstUnanswered >= 0 ? firstUnanswered : 0;
+
+    return {
+      stepNumber: candidate.step.stepNumber,
+      substepOrder: candidate.substep.order,
+      localIndex,
+      unitIndex: candidateStart + localIndex,
+      phase,
+    };
+  }
+
+  return { stepNumber: 5, substepOrder: 1, localIndex: 0, unitIndex: 0 };
 }

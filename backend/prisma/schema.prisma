@@ -133,8 +133,26 @@ model ApplicationStep {
   updatedAt     DateTime      @updatedAt
 
   items ApplicationItem[]
+  sections ApplicationSection[]
 
   @@unique([applicationId, stepNumber])
+}
+
+model ApplicationSection {
+  id                String           @id @default(cuid())
+  applicationStepId String
+  applicationStep   ApplicationStep  @relation(fields: [applicationStepId], references: [id], onDelete: Cascade)
+  substepOrder      Int
+  status            String           @default("NOT_STARTED") // NOT_STARTED | IN_PROGRESS | FINALIZED
+  finalizedReason   String?          // ALL_ITEMS_ANSWERED | ERROR_LIMIT
+  consecutiveErrors Int              @default(0)
+  startedAt         DateTime?
+  finalizedAt       DateTime?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  @@unique([applicationStepId, substepOrder])
+  @@index([applicationStepId, status])
 }
 
 model ApplicationItem {

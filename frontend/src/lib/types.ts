@@ -90,7 +90,19 @@ export interface ApplicationStep {
   startedAt: string | null;
   completedAt: string | null;
   notes: string | null;
+  sections: ApplicationSection[];
   items: ApplicationItem[];
+}
+
+export interface ApplicationSection {
+  id: string;
+  applicationStepId: string;
+  substepOrder: number;
+  status: 'NOT_STARTED' | 'IN_PROGRESS' | 'FINALIZED';
+  finalizedReason: 'ALL_ITEMS_ANSWERED' | 'ERROR_LIMIT' | null;
+  consecutiveErrors: number;
+  startedAt: string | null;
+  finalizedAt: string | null;
 }
 
 export interface ApplicationItem {
@@ -169,6 +181,9 @@ export interface ProgressExample {
 export interface ProgressSubstep {
   order: number;
   title: string;
+  status?: 'NOT_STARTED' | 'IN_PROGRESS' | 'FINALIZED';
+  finalizedReason?: 'ALL_ITEMS_ANSWERED' | 'ERROR_LIMIT' | null;
+  consecutiveErrors?: number;
   exampleCount: number;
   examples: ProgressExample[];
   totalItems: number;

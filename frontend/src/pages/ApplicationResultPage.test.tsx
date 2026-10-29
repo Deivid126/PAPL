@@ -141,4 +141,57 @@ describe('ApplicationResultPage', () => {
     expect(screen.getAllByText('Não respondida')).toHaveLength(2);
     expect(screen.getByText(/2 exemplos, contados à parte/)).toBeInTheDocument();
   });
+
+  it('exibe a quantidade de círculos esperada na segmentação respondida por toque', async () => {
+    apiMocks.api.mockImplementation(async () => ({
+      ...result,
+      status: 'IN_PROGRESS',
+      completedAt: null,
+      steps: [
+        {
+          stepNumber: 2,
+          skill: 'habilidades_metafonologicas',
+          status: 'IN_PROGRESS',
+          score: 1,
+          maxScore: 84,
+          completedAt: null,
+          timerMs: null,
+          answeredItems: 1,
+          totalItems: 1,
+          notes: null,
+          substeps: [{
+            order: 2,
+            title: '2.2 Segmentação silábica',
+            exampleCount: 0,
+            examples: [],
+            totalItems: 1,
+            answeredItems: 1,
+            correctItems: 1,
+            wrongItems: 0,
+            items: [{
+              itemNumber: 1,
+              prompt: `/"va/ -/ka/`,
+              expectedAnswer: 'vaca',
+              childAnswer: '2',
+              isCorrect: true,
+              answered: true,
+              notes: null,
+            }],
+          }],
+        },
+      ],
+    }));
+
+    render(
+      <MemoryRouter initialEntries={['/applications/app1/result']}>
+        <Routes>
+          <Route path="/applications/:id/result" element={<ApplicationResultPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('2 círculos')).toBeInTheDocument();
+    expect(screen.getByRole('cell', { name: 'vaca' })).toBeInTheDocument();
+    expect(screen.getAllByRole('cell', { name: '2' })).toHaveLength(2);
+  });
 });

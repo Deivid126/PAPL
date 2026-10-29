@@ -33,6 +33,26 @@ const protocol: ProtocolStep[] = [
           responseType: 'LETTER',
         })),
       },
+      {
+        id: 's2',
+        stepNumber: 1,
+        order: 2,
+        title: '1.2 Consoantes',
+        instructions: '',
+        trainingExamples: ['Exemplo 1: V'],
+        maxScore: 1,
+        timerRequired: false,
+        items: [{
+          id: 'i5',
+          substepId: 's2',
+          itemNumber: 1,
+          prompt: null,
+          expectedAnswer: 'V',
+          imageKey: null,
+          isPending: false,
+          responseType: 'LETTER',
+        }],
+      },
     ],
   },
 ];
@@ -63,6 +83,7 @@ function appWith(itemNumber: number, currentStep = 2): Application {
         startedAt: null,
         completedAt: null,
         notes: null,
+        sections: [],
         items: [
           {
             id: 'ai3',
@@ -87,6 +108,39 @@ describe('resumeCursor', () => {
   it('volta no terceiro teste salvo, sem contar os exemplos e sem avançar para o seguinte', () => {
     const cursor = resumeCursor(appWith(3), protocol);
     expect(cursor).toEqual({ stepNumber: 1, substepOrder: 1, localIndex: 2, unitIndex: 2 });
+  });
+
+  it('retoma na próxima seção aberta quando a última seção salva já foi finalizada', () => {
+    const saved = appWith(3);
+    saved.steps![0].sections = [
+      {
+        id: 'section-1',
+        applicationStepId: 'as1',
+        substepOrder: 1,
+        status: 'FINALIZED',
+        finalizedReason: 'ERROR_LIMIT',
+        consecutiveErrors: 5,
+        startedAt: '2026-10-15T12:00:00.000Z',
+        finalizedAt: '2026-10-15T12:00:00.000Z',
+      },
+      {
+        id: 'section-2',
+        applicationStepId: 'as1',
+        substepOrder: 2,
+        status: 'NOT_STARTED',
+        finalizedReason: null,
+        consecutiveErrors: 0,
+        startedAt: null,
+        finalizedAt: null,
+      },
+    ];
+    expect(resumeCursor(saved, protocol)).toMatchObject({
+      stepNumber: 1,
+      substepOrder: 2,
+      localIndex: 0,
+      unitIndex: 4,
+      phase: 'TRAINING',
+    });
   });
 
   it('ignora a etapa seguinte quando ela ainda não tem resposta salva', () => {

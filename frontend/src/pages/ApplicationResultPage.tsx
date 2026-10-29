@@ -4,6 +4,7 @@ import { api } from '../lib/api';
 import type { ApplicationResult } from '../lib/types';
 import { Alert, Spinner, StatusBadge } from '../components/ui';
 import { formatDate, formatTimerMs } from '../lib/format';
+import { countSyllables } from '../lib/syllableCircles';
 
 const SKILL_LABELS: Record<string, string> = {
   conhecimento_alfabeto: 'Conhecimento do alfabeto',
@@ -21,10 +22,19 @@ const SKILL_LABELS: Record<string, string> = {
  */
 function apresentadoEEsperado(
   tituloDaSubetapa: string | undefined,
-  item: { prompt?: string | null; expectedAnswer?: string | null },
+  item: { prompt?: string | null; expectedAnswer?: string | null; childAnswer?: string | null },
 ): { apresentado: string; esperado: string } {
   const apresentado = item.prompt ?? '—';
   const esperado = item.expectedAnswer ?? '—';
+  if (/segmenta/i.test(tituloDaSubetapa ?? '') && /^\d+$/.test(item.childAnswer ?? '')) {
+    const count = countSyllables(item.prompt);
+    if (count > 0) {
+      return {
+        apresentado: esperado,
+        esperado: `${count} ${count === 1 ? 'círculo' : 'círculos'}`,
+      };
+    }
+  }
   return /segmenta/i.test(tituloDaSubetapa ?? '')
     ? { apresentado: esperado, esperado: apresentado }
     : { apresentado, esperado };
@@ -172,6 +182,13 @@ export function ApplicationResultPage() {
                 s.substeps?.map((sub) => (
                   <div className="progress-substep" key={sub.order}>
                     <h4>{sub.title}</h4>
+                    {sub.status === 'FINALIZED' && (
+                      <p className="progress-count">
+                        {sub.finalizedReason === 'ERROR_LIMIT'
+                          ? 'Seção encerrada após cinco erros consecutivos.'
+                          : 'Seção finalizada: todos os itens foram respondidos.'}
+                      </p>
+                    )}
                     <p className="progress-count">
                       Prova: {sub.answeredItems} de {sub.totalItems} respondidas
                       {' · '}
