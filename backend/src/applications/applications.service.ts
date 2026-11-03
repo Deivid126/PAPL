@@ -380,11 +380,26 @@ export class ApplicationsService {
     this.assertEditable(app);
     const step = await this.getStep(id, stepNumber);
     const protocolStep = await this.ensureSections(step.id, stepNumber);
-    await this.assertSectionOpen(step.id, protocolStep, dto.itemNumber);
-
-    const item = await this.prisma.applicationItem.upsert(
-      this.itemUpsertArgs(step.id, dto),
+    const current = await this.prisma.applicationItem.findUnique({
+      where: {
+        applicationStepId_itemNumber: {
+          applicationStepId: step.id,
+          itemNumber: dto.itemNumber,
+        },
+      },
+    });
+    const wouldChange = this.itemWouldChange(
+      step.id,
+      dto,
+      current as Record<string, unknown> | undefined,
     );
+    if (wouldChange) {
+      await this.assertSectionOpen(step.id, protocolStep, dto.itemNumber);
+    }
+
+    const item = wouldChange
+      ? await this.prisma.applicationItem.upsert(this.itemUpsertArgs(step.id, dto))
+      : current!;
 
     // autosave: atualiza a etapa e o estado persistido da seção desta sessão.
     const updatedStep = await this.recomputeStepScore(step.id, stepNumber);
@@ -402,6 +417,24 @@ export class ApplicationsService {
    * Compartilhado por saveItem e saveItems para que a sanitização e o
    * cálculo da pontuação não possam divergir entre os dois caminhos.
    */
+  /**
+   * Diz se gravar este item mudaria alguma coisa.
+   *
+   * Importa para a trava de seção finalizada: o cliente reenvia respostas já
+   * salvas (ao abrir a aplicação as assinaturas de autosave começam vazias), e
+   * recusar um reenvio que não altera nada derrubava o lote inteiro — inclusive
+   * a resposta que o avaliador acabara de dar em outra seção, aberta.
+   */
+  private itemWouldChange(
+    applicationStepId: string,
+    dto: SaveStepItemDto,
+    current: Record<string, unknown> | undefined,
+  ): boolean {
+    if (!current) return true;
+    const { update } = this.itemUpsertArgs(applicationStepId, dto);
+    return Object.entries(update).some(([field, value]) => current[field] !== value);
+  }
+
   private itemUpsertArgs(applicationStepId: string, dto: SaveStepItemDto) {
     const childAnswer = sanitizeOptional(dto.childAnswer);
     const prompt = sanitizeOptional(dto.prompt);
@@ -469,9 +502,6 @@ export class ApplicationsService {
     this.assertEditable(app);
     const step = await this.getStep(id, stepNumber);
     const protocolStep = await this.ensureSections(step.id, stepNumber);
-    for (const item of dto.items) {
-      await this.assertSectionOpen(step.id, protocolStep, item.itemNumber);
-    }
 
     // Regravar item idêntico empurra o updatedAt e estraga a data da última
     // resposta da seção: ao abrir a tela o autosave reenvia tudo que já estava
@@ -483,14 +513,19 @@ export class ApplicationsService {
       },
     });
     const existingByNumber = new Map(existing.map((item) => [item.itemNumber, item]));
-    const changed = dto.items.filter((item: SaveStepItemDto) => {
-      const current = existingByNumber.get(item.itemNumber);
-      if (!current) return true;
-      const { update } = this.itemUpsertArgs(step.id, item);
-      return Object.entries(update).some(
-        ([field, value]) => (current as Record<string, unknown>)[field] !== value,
-      );
-    });
+    const changed = dto.items.filter((item: SaveStepItemDto) =>
+      this.itemWouldChange(
+        step.id,
+        item,
+        existingByNumber.get(item.itemNumber) as Record<string, unknown> | undefined,
+      ),
+    );
+
+    // A seção fechada só barra alteração de verdade. Barrar reenvio idêntico
+    // derrubava o lote todo e travava o avaliador numa seção aberta.
+    for (const item of changed) {
+      await this.assertSectionOpen(step.id, protocolStep, item.itemNumber);
+    }
 
     if (changed.length > 0) {
       await this.prisma.$transaction(

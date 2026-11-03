@@ -153,7 +153,12 @@ export function ApplicationRunPage() {
   // corrigir uma resposta já dada e responder o que ficou em branco. As
   // respostas continuam como estavam — reabrir não apaga nada.
   const [reopened, setReopened] = useState<Record<string, true>>({});
-  const [confirmReopen, setConfirmReopen] = useState<JumpTarget | null>(null);
+  // `stay` distingue as duas portas de entrada: pelo seletor a revisão volta
+  // ao primeiro item da seção; vinda de uma resposta recusada, destrava sem
+  // tirar o avaliador de onde ele está, com a criança na frente.
+  const [confirmReopen, setConfirmReopen] = useState<
+    { target: JumpTarget; stay: boolean } | null
+  >(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedSignaturesRef = useRef<Record<string, string>>({});
   const flushChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -333,9 +338,18 @@ export function ApplicationRunPage() {
       : undefined;
     const sectionKey = targetUnit ? `${currentStep}:${targetUnit.substep.order}` : '';
     if (section?.status === 'FINALIZED' && !reopened[sectionKey]) {
-      setModalError(
-        'Esta seção já foi finalizada nesta aplicação. Para corrigir, volte a ela pelo seletor "Ir para".',
+      // Em vez de um beco sem saída, oferece a revisão da própria seção que
+      // bloqueou: o avaliador está com a criança na frente e quer refazer.
+      const target = jumpTargets.find(
+        (candidate) =>
+          candidate.stepNumber === currentStep &&
+          candidate.substepOrder === targetUnit?.substep.order,
       );
+      if (target) setConfirmReopen({ target, stay: true });
+      else
+        setModalError(
+          'Esta seção já foi finalizada nesta aplicação. Para corrigir, volte a ela pelo seletor "Ir para".',
+        );
       return;
     }
     const key = String(itemNumber);
@@ -489,7 +503,27 @@ export function ApplicationRunPage() {
       setSavedAt(new Date().toLocaleTimeString('pt-BR'));
     } catch (err) {
       setSaving(false);
-      setModalError(`Não foi possível salvar esta resposta. ${errorMessage(err)}`);
+      const message = errorMessage(err);
+      // O servidor pode recusar por seção finalizada mesmo com a trava local
+      // satisfeita: entre o salvamento que finalizou a seção e esta resposta
+      // há uma corrida. Em vez do beco sem saída, oferece a revisão — a
+      // resposta recusada continua pendente e sobe no próximo flush.
+      const blockedUnit =
+        /seção já foi finalizada/i.test(message) && stepNumber === currentStep
+          ? units.find((unit) => unit.itemNumber === pending[0]?.body.itemNumber)
+          : undefined;
+      const target = blockedUnit
+        ? jumpTargets.find(
+            (candidate) =>
+              candidate.stepNumber === stepNumber &&
+              candidate.substepOrder === blockedUnit.substep.order,
+          )
+        : undefined;
+      if (target) {
+        setConfirmReopen({ target, stay: true });
+        return;
+      }
+      setModalError(`Não foi possível salvar esta resposta. ${message}`);
     }
   }
 
@@ -627,6 +661,25 @@ export function ApplicationRunPage() {
 
   // Salta para uma subetapa: entra na prova no primeiro item sem resposta
   // quando a subetapa já tem respostas salvas; senão, começa no treino.
+  /**
+   * Destrava a seção para revisão sem sair do item atual, e reenvia o que
+   * ficou pendente — a resposta recusada pelo servidor continua na fila.
+   */
+  async function unlockSection(target: JumpTarget) {
+    if (target.substepOrder == null) return;
+    const sectionKey = `${target.stepNumber}:${target.substepOrder}`;
+    try {
+      await api(
+        `/applications/${id}/steps/${target.stepNumber}/sections/${target.substepOrder}/reopen`,
+        { method: 'POST' },
+      );
+      setReopened((prev) => ({ ...prev, [sectionKey]: true }));
+      await flushAll();
+    } catch (err) {
+      setModalError(errorMessage(err));
+    }
+  }
+
   async function jumpTo(target: JumpTarget, options?: { review?: boolean }) {
     const sectionKey = target.substepOrder == null
       ? null
@@ -638,7 +691,7 @@ export function ApplicationRunPage() {
     // na revisão sem querer ao escolher no seletor.
     const review = options?.review ?? false;
     if (finalized && !review && sectionKey != null && !reopened[sectionKey]) {
-      setConfirmReopen(target);
+      setConfirmReopen({ target, stay: false });
       return;
     }
     try {
@@ -1150,9 +1203,11 @@ export function ApplicationRunPage() {
               className="btn btn-primary"
               type="button"
               onClick={() => {
-                const target = confirmReopen;
+                const pending = confirmReopen;
                 setConfirmReopen(null);
-                if (target) void jumpTo(target, { review: true });
+                if (!pending) return;
+                if (pending.stay) void unlockSection(pending.target);
+                else void jumpTo(pending.target, { review: true });
               }}
             >
               Revisar respostas
@@ -1161,11 +1216,12 @@ export function ApplicationRunPage() {
         }
       >
         <p>
-          {confirmReopen?.label} já foi finalizada. A revisão volta ao primeiro item com as
-          respostas como estão; você pode corrigir o que já respondeu e preencher o que ficou
-          em branco.
+          {confirmReopen?.target.label} já foi finalizada.{' '}
+          {confirmReopen?.stay
+            ? 'Liberar a revisão mantém você neste item e grava a resposta que acabou de dar.'
+            : 'A revisão volta ao primeiro item com as respostas como estão; você pode corrigir o que já respondeu e preencher o que ficou em branco.'}
         </p>
-        {confirmReopen?.section?.finalizedReason === 'ERROR_LIMIT' ? (
+        {confirmReopen?.target.section?.finalizedReason === 'ERROR_LIMIT' ? (
           <p>
             Atenção: esta seção foi encerrada pela regra de parada do protocolo, após 5 erros
             consecutivos. Só altere se houve engano no registro.

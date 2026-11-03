@@ -162,6 +162,67 @@ function renderRun() {
 describe('ApplicationRunPage', () => {
   beforeEach(() => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
+    // Sem isso o histórico de chamadas atravessa os testes, e asserções do
+    // tipo "não chamou /reopen" passam a ver a chamada de um teste anterior.
+    apiMocks.api.mockClear();
+  });
+
+  it('oferece revisar sem sair do item quando o servidor recusa a resposta', async () => {
+    // O avaliador está com a criança na frente, responde e o servidor recusa
+    // porque a seção finalizou entre o salvamento anterior e este. Antes isso
+    // era um beco sem saída: "Não foi possível salvar esta resposta".
+    const saved = makeApp(1);
+    let liberada = false;
+    apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
+      if (url === '/applications/app1') return saved;
+      if (url === '/protocol/steps') return protocolSteps;
+      if (url.endsWith('/reopen')) {
+        liberada = true;
+        return {};
+      }
+      // Como o servidor: recusa enquanto a seção está travada, aceita depois.
+      if (url.endsWith('/items/batch')) {
+        if (!liberada) throw new Error('Esta seção já foi finalizada nesta aplicação.');
+        return {};
+      }
+      return {};
+    });
+
+    renderRun();
+    await screen.findByRole('heading', { name: 'Conhecimento do alfabeto' });
+
+    const choiceGroup = screen.getByRole('group', { name: 'Escolha uma letra' });
+    fireEvent.click(within(choiceGroup).getAllByRole('button')[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Próximo exemplo/ }));
+    await screen.findByText(/Exemplo 2/, undefined, { timeout: 8000 });
+    fireEvent.click(within(screen.getByRole('group', { name: 'Escolha uma letra' })).getAllByRole('button')[0]);
+    fireEvent.click(screen.getByRole('button', { name: /Ir para a prova/ }));
+    fireEvent.click(within(screen.getByRole('group', { name: 'Escolha uma letra' })).getAllByRole('button')[0]);
+
+    // Em vez do erro sem saída, a oferta de liberar a seção ali mesmo.
+    expect(await screen.findByText('Revisar esta seção?', undefined, { timeout: 8000 })).toBeInTheDocument();
+    expect(screen.getByText(/mantém você neste item/)).toBeInTheDocument();
+    expect(screen.queryByText(/Não foi possível salvar esta resposta/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Revisar respostas' }));
+
+    await waitFor(() =>
+      expect(apiMocks.api).toHaveBeenCalledWith(
+        '/applications/app1/steps/1/sections/1/reopen',
+        { method: 'POST' },
+      ),
+    );
+
+    // A resposta recusada sobe sozinha depois da liberação, sem o avaliador
+    // ter de responder de novo. Esperar aqui também drena o teste.
+    await waitFor(
+      () =>
+        expect(
+          apiMocks.api.mock.calls.filter(([url]) => String(url).endsWith('/items/batch')).length,
+        ).toBeGreaterThan(1),
+      { timeout: 8000 },
+    );
+    expect(screen.queryByText(/Não foi possível salvar esta resposta/)).not.toBeInTheDocument();
   });
 
   it('oferece revisar uma seção finalizada e confirma antes de reabrir', async () => {
@@ -316,13 +377,12 @@ describe('ApplicationRunPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Ir para a prova/ }));
     expect(await screen.findByText('A criança acertou?')).toBeInTheDocument();
 
-    // O salto encadeia a marcação da etapa como em andamento. Esperar aqui
-    // evita que essa chamada caia na contagem do teste seguinte.
+    // O salto encadeia a troca de etapa. Esperar aqui evita que essa chamada
+    // caia na contagem do teste seguinte.
     await waitFor(() =>
-      expect(apiMocks.api).toHaveBeenCalledWith(
-        '/applications/app1/steps/1',
-        expect.objectContaining({ method: 'PATCH' }),
-      ),
+      expect(
+        apiMocks.api.mock.calls.some(([, init]) => (init as RequestInit)?.method === 'PATCH'),
+      ).toBe(true),
     );
   });
 

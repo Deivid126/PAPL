@@ -21,7 +21,12 @@ import { HealthController } from './health.controller';
       validate: validateEnv,
     }),
     ThrottlerModule.forRoot({
-      throttlers: [{ ttl: 60000, limit: 120 }],
+      // A suíte faz centenas de requisições em segundos e esbarrava no limite,
+      // derrubando testes que nada têm a ver com rate limit — o 429 aparecia
+      // em um teste diferente a cada execução.
+      throttlers: [
+        { ttl: 60000, limit: process.env.NODE_ENV === 'test' ? 100_000 : 120 },
+      ],
     }),
     PrismaModule,
     MailModule,

@@ -28,6 +28,18 @@ class UpdateProfileDto {
   name?: string;
 }
 
+
+/**
+ * Limite por rota, afrouxado só em teste.
+ *
+ * A suíte faz dezenas de logins em segundos e estourava o limite de produção,
+ * fazendo falhar um teste diferente a cada execução — sempre com 429, nunca
+ * pelo motivo que o teste investigava. Em produção os valores são os mesmos.
+ */
+const throttle = (limit: number) => ({
+  default: { limit: process.env.NODE_ENV === 'test' ? 100_000 : limit, ttl: 60_000 },
+});
+
 @ApiTags('Autenticação')
 @Controller('auth')
 export class AuthController {
@@ -43,7 +55,7 @@ export class AuthController {
 
   @Public()
   @Post('login')
-  @Throttle({ default: { limit: 8, ttl: 60000 } })
+  @Throttle(throttle(8))
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login (emite access e refresh token)' })
   login(@Body() dto: LoginDto) {
@@ -52,7 +64,7 @@ export class AuthController {
 
   @Public()
   @Post('refresh')
-  @Throttle({ default: { limit: 20, ttl: 60000 } })
+  @Throttle(throttle(20))
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Renova os tokens via refresh token' })
   refresh(@Body() dto: RefreshDto) {
@@ -69,7 +81,7 @@ export class AuthController {
 
   @Public()
   @Post('forgot-password')
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle(throttle(5))
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Solicita link de recuperação de senha' })
   forgotPassword(@Body() dto: ForgotPasswordDto) {
@@ -78,7 +90,7 @@ export class AuthController {
 
   @Public()
   @Post('reset-password')
-  @Throttle({ default: { limit: 5, ttl: 60000 } })
+  @Throttle(throttle(5))
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Define nova senha com o token de recuperação' })
   resetPassword(@Body() dto: ResetPasswordDto) {

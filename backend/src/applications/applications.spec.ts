@@ -138,13 +138,13 @@ describe('Applications', () => {
     const child = await createChild(app, user.accessToken);
     const app1 = await createApplication(app, user.accessToken, child.id);
     const initialStep = app1.steps.find((s: any) => s.stepNumber === stepNumber);
-    expect(initialStep.substeps.map((section: any) => section.status)).toEqual([
+    expect(initialStep.sections.map((section: any) => section.status)).toEqual([
       'NOT_STARTED',
       'NOT_STARTED',
     ]);
     const secondApplication = await createApplication(app, user.accessToken, child.id);
     const secondStep = secondApplication.steps.find((s: any) => s.stepNumber === stepNumber);
-    expect(secondStep.substeps.map((section: any) => section.status)).toEqual([
+    expect(secondStep.sections.map((section: any) => section.status)).toEqual([
       'NOT_STARTED',
       'NOT_STARTED',
     ]);
@@ -154,7 +154,7 @@ describe('Applications', () => {
       .get(`/applications/${app1.id}`)
       .set(auth(user.accessToken))
       .expect(200);
-    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).substeps[0].status)
+    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).sections[0].status)
       .toBe('IN_PROGRESS');
 
     await saveItem(app, user.accessToken, app1.id, stepNumber, 2, { correct: true });
@@ -162,7 +162,7 @@ describe('Applications', () => {
       .get(`/applications/${app1.id}`)
       .set(auth(user.accessToken))
       .expect(200);
-    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).substeps[0]).toMatchObject({
+    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).sections[0]).toMatchObject({
       status: 'FINALIZED',
       finalizedReason: 'ALL_ITEMS_ANSWERED',
     });
@@ -174,12 +174,32 @@ describe('Applications', () => {
       .get(`/applications/${app1.id}`)
       .set(auth(user.accessToken))
       .expect(200);
-    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).substeps[1]).toMatchObject({
+    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).sections[1]).toMatchObject({
       status: 'FINALIZED',
       finalizedReason: 'ERROR_LIMIT',
     });
     await saveItem(app, user.accessToken, app1.id, stepNumber, 8, { correct: true })
       .then((res) => expect(res.status).toBe(403));
+
+    // Reenviar a MESMA resposta de uma seção finalizada não pode ser recusado:
+    // é o que o autosave faz ao abrir a aplicação. Recusar derrubava o lote
+    // inteiro e travava o avaliador numa seção que estava aberta.
+    await saveItem(app, user.accessToken, app1.id, stepNumber, 1, { correct: false })
+      .then((res) => expect(res.status).toBe(201));
+
+    await request(app.getHttpServer())
+      .post(`/applications/${app1.id}/steps/${stepNumber}/items/batch`)
+      .set(auth(user.accessToken))
+      .send({
+        // O mesmo payload que o autosave reenvia: a resposta inteira, igual
+        // à que já está gravada. Omitir childAnswer seria apagá-la, e aí a
+        // recusa estaria correta.
+        items: [
+          { itemNumber: 1, childAnswer: 'errado', isCorrect: false },
+          { itemNumber: 2, childAnswer: 'ok', isCorrect: true },
+        ],
+      })
+      .expect(201);
   });
 
   it('isola aplicações entre avaliadores', async () => {
