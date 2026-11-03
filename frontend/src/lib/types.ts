@@ -33,6 +33,8 @@ export interface Child {
   grade: string | null;
   notes: string | null;
   doesNotRead: boolean;
+  /** Habilidade DHACA de 1 a 5; nulo quando não informado. */
+  dhaca: number | null;
   createdAt: string;
   updatedAt: string;
   applicationsCount?: number;

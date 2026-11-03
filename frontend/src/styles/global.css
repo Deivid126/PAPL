@@ -1162,11 +1162,19 @@ code {
   transition: border-color 120ms ease, background-color 120ms ease, box-shadow 120ms ease;
 }
 
-.syllable-circle-button:hover,
+/* Só em dispositivo com ponteiro: no toque o :hover gruda depois do clique e
+   o círculo continua com cara de marcado mesmo depois de desmarcado. */
+@media (hover: hover) {
+  .syllable-circle-button:hover {
+    border-color: var(--color-primary);
+  }
+}
+
+/* Foco é contorno por fora, nunca a borda do estado marcado — senão o círculo
+   recém-clicado parece selecionado enquanto mantém o foco. */
 .syllable-circle-button:focus-visible {
-  border-color: var(--color-primary);
-  box-shadow: 0 0 0 4px var(--color-primary-soft);
-  outline: none;
+  outline: 3px solid var(--color-primary);
+  outline-offset: 3px;
 }
 
 .syllable-circle-button.selected {
@@ -1779,6 +1787,26 @@ code {
   padding-block: 0.4rem;
   font-size: 0.875rem;
 }
+
+/* Segmentação silábica: o cabeçalho é referência do aplicador, não conteúdo
+   da prova. Vai ao menor tamanho que ainda se lê, para a figura e os círculos
+   caberem sem rolagem. */
+.page-run-compact .run-rail-id h1 { font-size: 0.8rem; }
+.page-run-compact .run-rail-id .page-subtitle { font-size: 0.7rem; }
+.page-run-compact .run-rail .jump-nav span { font-size: 0.7rem; }
+
+.page-run-compact .run-rail .jump-nav .input,
+.page-run-compact .run-rail .btn {
+  padding-block: 0.25rem;
+  font-size: 0.7rem;
+}
+
+.page-run-compact .run-rail {
+  gap: 0.35rem 0.75rem;
+  padding-bottom: 0.4rem;
+}
+
+.page-run-compact .run-rail-status .save-status { font-size: 0.7rem; }
 
 /* Progresso e autosave numa linha só: são confirmação periférica para o
    avaliador, não conteúdo. */

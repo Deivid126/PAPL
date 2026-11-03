@@ -1,22 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { countSyllables, circleCountForPrompt, isCorrectSyllableSelection } from './syllableCircles';
+import { countSyllables, circleCountForPrompt, SYLLABLE_CIRCLE_COUNT } from './syllableCircles';
 
 describe('syllable circle counts', () => {
-  it('creates three circles for the two syllables in vaca', () => {
-    const prompt = `/"va/ -/ka/`;
-    expect(countSyllables(prompt)).toBe(2);
-    expect(circleCountForPrompt(prompt)).toBe(3);
+  it('always shows three circles, whatever the syllable count', () => {
+    // A quantidade de círculos não pode entregar a resposta à criança.
+    expect(circleCountForPrompt(`/"va/ -/ka/`)).toBe(3);
+    expect(circleCountForPrompt(`/mar/-/'te/-/lo/`)).toBe(3);
+    expect(circleCountForPrompt(`/kõ/ -/pu/ -/ta/ -/'dor/`)).toBe(3);
+    expect(circleCountForPrompt(null)).toBe(SYLLABLE_CIRCLE_COUNT);
   });
 
-  it('creates four circles for the three syllables in martelo', () => {
-    const prompt = `/mar/-/'te/-/lo/`;
-    expect(countSyllables(prompt)).toBe(3);
-    expect(circleCountForPrompt(prompt)).toBe(4);
-  });
-
-  it('marks the answer correct when the child selects one circle per syllable', () => {
-    expect(isCorrectSyllableSelection(2, `/"va/ -/ka/`)).toBe(true);
-    expect(isCorrectSyllableSelection(1, `/"va/ -/ka/`)).toBe(false);
-    expect(isCorrectSyllableSelection(4, `/mar/-/'te/-/lo/`)).toBe(false);
+  it('still counts the syllables in the prompt, for the evaluator reference', () => {
+    expect(countSyllables(`/"va/ -/ka/`)).toBe(2);
+    expect(countSyllables(`/mar/-/'te/-/lo/`)).toBe(3);
+    expect(countSyllables(null)).toBe(0);
   });
 });

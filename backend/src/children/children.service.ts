@@ -48,6 +48,7 @@ export class ChildrenService {
         grade: dto.grade,
         notes: dto.notes,
         doesNotRead: dto.doesNotRead ?? false,
+        dhaca: dto.dhaca ?? null,
       },
     });
 
@@ -194,6 +195,8 @@ export class ChildrenService {
     if (dto.grade !== undefined) data.grade = dto.grade;
     if (dto.notes !== undefined) data.notes = dto.notes;
     if (dto.doesNotRead !== undefined) data.doesNotRead = dto.doesNotRead;
+    // null é valor legítimo: limpa a habilidade informada antes.
+    if (dto.dhaca !== undefined) data.dhaca = dto.dhaca;
 
     const updated = await this.prisma.child.update({ where: { id }, data });
     return this.serialize(updated);
@@ -233,6 +236,7 @@ export class ChildrenService {
     grade: string | null;
     notes: string | null;
     doesNotRead: boolean;
+    dhaca?: number | null;
     createdAt: Date;
     updatedAt: Date;
   }) {
@@ -248,6 +252,7 @@ export class ChildrenService {
       grade: child.grade,
       notes: child.notes,
       doesNotRead: child.doesNotRead,
+      dhaca: child.dhaca ?? null,
       createdAt: child.createdAt,
       updatedAt: child.updatedAt,
     };

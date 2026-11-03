@@ -2,9 +2,12 @@ import {
   IsDateString,
   IsBoolean,
   IsIn,
+  IsInt,
   IsOptional,
   IsString,
+  Max,
   MaxLength,
+  Min,
   MinLength,
 } from 'class-validator';
 
@@ -41,4 +44,11 @@ export class UpdateChildDto {
   @IsOptional()
   @IsBoolean()
   doesNotRead?: boolean;
+
+  // DHACA: 1 a 5 (primeira à quinta habilidade). Nulo quando não informado.
+  @IsOptional()
+  @IsInt({ message: 'Habilidade DHACA inválida.' })
+  @Min(1, { message: 'Habilidade DHACA inválida.' })
+  @Max(5, { message: 'Habilidade DHACA inválida.' })
+  dhaca?: number | null;
 }

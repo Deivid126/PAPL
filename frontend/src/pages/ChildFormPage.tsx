@@ -1,10 +1,31 @@
-import { useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, errorMessage } from '../lib/api';
-import { Alert, Field } from '../components/ui';
+import { Alert, Field, Spinner } from '../components/ui';
+import type { Child } from '../lib/types';
 
+/** Habilidades do DHACA, da primeira à quinta. */
+export const DHACA_OPTIONS = [1, 2, 3, 4, 5] as const;
+
+const DHACA_LABELS: Record<number, string> = {
+  1: '1ª habilidade',
+  2: '2ª habilidade',
+  3: '3ª habilidade',
+  4: '4ª habilidade',
+  5: '5ª habilidade',
+};
+
+/**
+ * Cadastro e edição de criança.
+ *
+ * A mesma tela serve aos dois: com :id na rota carrega o cadastro e envia
+ * PATCH; sem :id, envia POST. Campo em branco na edição vira null, para o
+ * avaliador conseguir limpar o que preencheu antes.
+ */
 export function ChildFormPage() {
   const navigate = useNavigate();
+  const { id } = useParams();
+  const isEdit = Boolean(id);
   const [name, setName] = useState('');
   const [birthDate, setBirthDate] = useState('');
   const [sex, setSex] = useState('');
@@ -12,9 +33,38 @@ export function ChildFormPage() {
   const [grade, setGrade] = useState('');
   const [notes, setNotes] = useState('');
   const [doesNotRead, setDoesNotRead] = useState(false);
+  const [dhaca, setDhaca] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+  const [loadingChild, setLoadingChild] = useState(isEdit);
+
+  useEffect(() => {
+    if (!id) return;
+    let active = true;
+    (async () => {
+      try {
+        const child = await api<Child>(`/children/${id}`);
+        if (!active) return;
+        setName(child.name);
+        // birthDate vem ISO; o input type="date" só aceita AAAA-MM-DD.
+        setBirthDate(child.birthDate.slice(0, 10));
+        setSex(child.sex ?? '');
+        setSchool(child.school ?? '');
+        setGrade(child.grade ?? '');
+        setNotes(child.notes ?? '');
+        setDoesNotRead(child.doesNotRead);
+        setDhaca(child.dhaca == null ? '' : String(child.dhaca));
+      } catch (err) {
+        if (active) setError(errorMessage(err));
+      } finally {
+        if (active) setLoadingChild(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [id]);
 
   function validate() {
     const fe: Record<string, string> = {};
@@ -31,19 +81,29 @@ export function ChildFormPage() {
     if (!validate()) return;
     setLoading(true);
     try {
-      const res = await api<{ id: string }>('/children', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: name.trim(),
-          birthDate,
-          sex: sex || undefined,
-          school: school || undefined,
-          grade: grade || undefined,
-          notes: notes || undefined,
-          doesNotRead,
-        }),
-      });
-      navigate(`/children/${res.id}`);
+      // Na edição, campo vazio precisa virar null para apagar o valor antigo;
+      // no cadastro, undefined deixa o campo simplesmente fora do payload.
+      const blank = isEdit ? null : undefined;
+      const body = {
+        name: name.trim(),
+        birthDate,
+        sex: sex || blank,
+        school: school || blank,
+        grade: grade || blank,
+        notes: notes || blank,
+        doesNotRead,
+        dhaca: dhaca ? Number(dhaca) : blank,
+      };
+      if (isEdit) {
+        await api(`/children/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        navigate(`/children/${id}`);
+      } else {
+        const res = await api<{ id: string }>('/children', {
+          method: 'POST',
+          body: JSON.stringify(body),
+        });
+        navigate(`/children/${res.id}`);
+      }
     } catch (err) {
       setError(errorMessage(err));
     } finally {
@@ -51,14 +111,22 @@ export function ChildFormPage() {
     }
   }
 
+  if (loadingChild) {
+    return (
+      <div className="page">
+        <Spinner />
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <header className="page-header">
         <div>
-          <Link to="/children" className="btn btn-ghost btn-sm">
-            ← Lista de crianças
+          <Link to={isEdit ? `/children/${id}` : '/children'} className="btn btn-ghost btn-sm">
+            ← {isEdit ? 'Voltar para a criança' : 'Lista de crianças'}
           </Link>
-          <h1>Cadastrar criança</h1>
+          <h1>{isEdit ? 'Editar criança' : 'Cadastrar criança'}</h1>
           <p className="page-subtitle">A idade é calculada automaticamente a partir da data de nascimento.</p>
         </div>
       </header>
@@ -97,6 +165,21 @@ export function ChildFormPage() {
               <option value="NÃO_INFORMADO">Prefiro não informar</option>
             </select>
           </Field>
+          <Field label="DHACA (opcional)" htmlFor="dhaca">
+            <select
+              id="dhaca"
+              className="input"
+              value={dhaca}
+              onChange={(e) => setDhaca(e.target.value)}
+            >
+              <option value="">Não informado</option>
+              {DHACA_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {DHACA_LABELS[option]}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="Escola (opcional)" htmlFor="school">
             <input
               id="school"
@@ -132,9 +215,9 @@ export function ChildFormPage() {
           </label>
           <div className="form-actions">
             <button className="btn btn-primary" type="submit" disabled={loading}>
-              {loading ? 'Salvando...' : 'Salvar criança'}
+              {loading ? 'Salvando...' : isEdit ? 'Salvar alterações' : 'Salvar criança'}
             </button>
-            <Link className="btn btn-secondary" to="/children">
+            <Link className="btn btn-secondary" to={isEdit ? `/children/${id}` : '/children'}>
               Cancelar
             </Link>
           </div>

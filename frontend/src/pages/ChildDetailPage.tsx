@@ -55,6 +55,9 @@ export function ChildDetailPage() {
           </p>
         </div>
         <div className="page-actions">
+          <Link to={`/children/${child.id}/edit`} className="btn btn-secondary">
+            Editar cadastro
+          </Link>
           <Link to={`/applications/new?childId=${child.id}`} className="btn btn-primary">
             <IconClipboard /> Nova aplicação
           </Link>
@@ -80,6 +83,10 @@ export function ChildDetailPage() {
             <div>
               <dt>Sexo</dt>
               <dd>{child.sex ?? 'Não informado'}</dd>
+            </div>
+            <div>
+              <dt>DHACA</dt>
+              <dd>{child.dhaca ? `${child.dhaca}ª habilidade` : 'Não informado'}</dd>
             </div>
             <div>
               <dt>Escola</dt>

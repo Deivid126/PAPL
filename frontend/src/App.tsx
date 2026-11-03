@@ -55,6 +55,14 @@ export function App() {
         }
       />
       <Route
+        path="/children/:id/edit"
+        element={
+          <Protected>
+            <ChildFormPage />
+          </Protected>
+        }
+      />
+      <Route
         path="/children/:id"
         element={
           <Protected>

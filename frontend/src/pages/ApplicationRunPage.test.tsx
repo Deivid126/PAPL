@@ -268,7 +268,65 @@ describe('ApplicationRunPage', () => {
     }
   });
 
-  it('mostra círculos por sílaba e salva a quantidade selecionada pela criança', async () => {
+  it('mostra os círculos também nos exemplos de treino', async () => {
+    const saved = makeApp(2);
+    const segmentationProtocol = structuredClone(protocolSteps) as ProtocolStep[];
+    segmentationProtocol[1].substeps = [{
+      id: 'ps-segmentation',
+      stepNumber: 2,
+      order: 2,
+      title: '2.2 Segmentação silábica',
+      instructions: '',
+      trainingExamples: [`Exemplo 1|/"ba/ -/la/|bala|bala.png`],
+      maxScore: 21,
+      timerRequired: false,
+      items: [{
+        id: 'item-vaca',
+        substepId: 'ps-segmentation',
+        itemNumber: 1,
+        prompt: `/"va/ -/ka/`,
+        expectedAnswer: 'vaca',
+        imageKey: 'segmentacao_silabica/vaca.png',
+        isPending: false,
+        responseType: 'SYLLABLE',
+      }],
+    }];
+    apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
+      if (url === '/applications/app1') return saved;
+      if (url === '/protocol/steps') return segmentationProtocol;
+      return {};
+    });
+
+    renderRun();
+
+    // Sem resposta salva não há cursor de retomada: chega-se à subetapa pelo
+    // seletor, como o aplicador faz.
+    const jumpSelect = await screen.findByLabelText('Ir para');
+    const target = within(jumpSelect)
+      .getAllByRole('option')
+      .find((option) => option.textContent?.includes('2.2 Segmentação silábica'));
+    fireEvent.change(jumpSelect, { target: { value: (target as HTMLOptionElement).value } });
+
+    // A subetapa abre no treino, e o treino segue o mesmo caminho da prova:
+    // três círculos para a criança bater.
+    const circleGroup = await screen.findByRole('group', { name: 'Separação em sílabas' });
+    expect(within(circleGroup).getAllByRole('button')).toHaveLength(3);
+
+    // Avançar o exemplo também passa pela pergunta de acerto.
+    fireEvent.click(screen.getByRole('button', { name: /Ir para a prova/ }));
+    expect(await screen.findByText('A criança acertou?')).toBeInTheDocument();
+
+    // O salto encadeia a marcação da etapa como em andamento. Esperar aqui
+    // evita que essa chamada caia na contagem do teste seguinte.
+    await waitFor(() =>
+      expect(apiMocks.api).toHaveBeenCalledWith(
+        '/applications/app1/steps/1',
+        expect.objectContaining({ method: 'PATCH' }),
+      ),
+    );
+  });
+
+  it('mostra sempre três círculos, permite desmarcar e pergunta o acerto ao aplicador', async () => {
     const saved = makeApp(2);
     const segmentationPrompt = `/"va/ -/ka/`;
     saved.steps![1].sections = [{
@@ -329,17 +387,36 @@ describe('ApplicationRunPage', () => {
     expect(screen.getByText('vaca')).toBeInTheDocument();
     expect(screen.queryByText(segmentationPrompt)).not.toBeInTheDocument();
 
+    const pressedCount = () =>
+      within(circleGroup)
+        .getAllByRole('button')
+        .filter((circle) => circle.getAttribute('aria-pressed') === 'true').length;
+
     fireEvent.click(circles[0]);
     fireEvent.click(circles[1]);
-    expect(within(circleGroup).getAllByRole('button').filter((circle) => circle.getAttribute('aria-pressed') === 'true')).toHaveLength(2);
+    expect(pressedCount()).toBe(2);
+
+    // Bater de novo no mesmo círculo desmarca.
+    fireEvent.click(circles[1]);
+    expect(pressedCount()).toBe(1);
+    fireEvent.click(circles[1]);
+    expect(pressedCount()).toBe(2);
+
+    // Quem decide o acerto é o aplicador, não a quantidade de círculos.
     fireEvent.click(screen.getByRole('button', { name: /Concluir etapa/ }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Acertou' }));
     fireEvent.click(await screen.findByRole('button', { name: /Confirmar e prosseguir/ }));
 
     await waitFor(() => expect(apiMocks.api).toHaveBeenCalledWith(
       '/applications/app1/steps/2/items/batch',
       expect.objectContaining({ method: 'POST' }),
     ));
-    const batchCall = apiMocks.api.mock.calls.find(([url]) => url === '/applications/app1/steps/2/items/batch');
+    // A última: a gravação que interessa é a do julgamento, e antes dela pode
+    // haver flush de outras telas por que a aplicação passou.
+    const batchCalls = apiMocks.api.mock.calls.filter(
+      ([url]) => url === '/applications/app1/steps/2/items/batch',
+    );
+    const batchCall = batchCalls[batchCalls.length - 1];
     const payload = JSON.parse(String(batchCall?.[1]?.body)) as { items: Array<Record<string, unknown>> };
     expect(payload.items[0]).toMatchObject({
       itemNumber: 1,

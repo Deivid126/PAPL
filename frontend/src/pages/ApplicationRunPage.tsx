@@ -14,7 +14,7 @@ import { Alert, Modal, ProgressBar, Spinner } from '../components/ui';
 import { IconArrowLeft, IconArrowRight, IconClock, IconSave } from '../components/Icons';
 import { formatDate } from '../lib/format';
 import { resumeCursor } from '../lib/resume';
-import { circleCountForPrompt, isCorrectSyllableSelection } from '../lib/syllableCircles';
+import { circleCountForPrompt } from '../lib/syllableCircles';
 import { deriveSectionState } from '../lib/sectionProgress';
 
 /** Destino do seletor "Ir para": uma subetapa do protocolo, ou a revisão. */
@@ -713,7 +713,13 @@ export function ApplicationRunPage() {
   }
 
   return (
-    <div className="page page-app page-run">
+    // A segmentação é a tela com mais coisa na vertical (figura, círculos e a
+    // pergunta de acerto): o cabeçalho encolhe para sobrar altura.
+    <div
+      className={`page page-app page-run${
+        currentStep === 2 && step2Substep === 2 ? ' page-run-compact' : ''
+      }`}
+    >
       <header className="page-header run-rail">
         <div className="run-rail-id">
           <h1>{SKILL_LABELS[currentStepData?.skill ?? ''] ?? `Etapa ${currentStep}`}</h1>
@@ -1283,6 +1289,9 @@ function SegmentationStepView({
   const [visitedMark, setVisitedMark] = useState<boolean | null>(null);
   const [visitedFile, setVisitedFile] = useState<string>('');
   const [selectedSyllableCircles, setSelectedSyllableCircles] = useState<number[]>([]);
+  // Prosseguir na segmentação abre a pergunta de acerto: quem julga é o
+  // aplicador, e não a quantidade de círculos que a criança bateu.
+  const [askingJudgement, setAskingJudgement] = useState(false);
   const isPhoneme = mode === 'phoneme';
   const isProduction = mode === 'production';
   const isComprehension = mode === 'comprehension';
@@ -1302,7 +1311,9 @@ function SegmentationStepView({
   const imageKey = phase === 'TRAINING' && parts[3] ? `${storageDir}/${parts[3]}` : currentUnit?.imageKey ?? '';
   const hasImage = imageKey !== '';
   const mark = phase === 'TRAINING' ? trainingMark : states[String(currentUnit?.itemNumber)]?.isCorrect ?? null;
-  const isSyllableChoice = mode === 'segmentation' && phase === 'TEST';
+  // Os exemplos seguem o mesmo caminho da prova: a criança bate nos círculos
+  // no treino também, para chegar à prova já sabendo o que fazer.
+  const isSyllableChoice = mode === 'segmentation';
   const syllableCircleCount = isSyllableChoice ? circleCountForPrompt(syllables) : 0;
   const savedChildAnswer = states[String(currentUnit?.itemNumber)]?.childAnswer ?? '';
   const savedCircleCount = Number.parseInt(savedChildAnswer, 10);
@@ -1407,23 +1418,48 @@ function SegmentationStepView({
     .map((w) => ({ word: w, image: EXAMPLE_IMAGES[w] }))
     .filter((e) => e.image);
 
+  // A contagem salva é lida por ref porque a restauração só vale na troca de
+  // item. Como dependência ela refazia a seleção a cada gravação, desmarcando
+  // o que a criança tinha acabado de bater.
+  const savedCircleCountRef = useRef(savedCircleCount);
+  savedCircleCountRef.current = savedCircleCount;
+
   useEffect(() => {
     setTrainingMark(null);
     setVisitedMark(null);
     setVisitedFile('');
-    const restoredCount = Number.isInteger(savedCircleCount) && savedCircleCount > 0
-      ? Math.min(savedCircleCount, syllableCircleCount)
+    const saved = savedCircleCountRef.current;
+    const restoredCount = Number.isInteger(saved) && saved > 0
+      ? Math.min(saved, syllableCircleCount)
       : 0;
     setSelectedSyllableCircles(
       isSyllableChoice ? Array.from({ length: restoredCount }, (_, index) => index) : [],
     );
-  }, [phase, itemIndex, isSyllableChoice, savedCircleCount, syllableCircleCount]);
+  }, [phase, itemIndex, isSyllableChoice, syllableCircleCount]);
 
 
   if (!currentUnit && phase === 'TEST') return null;
-  const canContinue = isSyllableChoice
-    ? selectedSyllableCircles.length > 0
-    : mark !== null;
+  // Na segmentação o acerto é perguntado ao prosseguir, então não há o que
+  // travar antes: a criança pode não bater em círculo nenhum.
+  const canContinue = isSyllableChoice ? true : mark !== null;
+
+  /** Grava o que o aplicador respondeu na pergunta de acerto e avança. */
+  function registerJudgement(isCorrect: boolean) {
+    setAskingJudgement(false);
+    if (phase === 'TRAINING') {
+      setTrainingMark(isCorrect);
+    } else if (currentUnit) {
+      setUnit(currentUnit.itemNumber, {
+        // A contagem de círculos vira registro do que a criança fez; ela não
+        // decide mais o acerto.
+        childAnswer: String(selectedSyllableCircles.length),
+        isCorrect,
+        prompt: syllables,
+        expectedAnswer: word,
+      });
+    }
+    void onNext();
+  }
   // Letra/sílaba grande: fonemas simples usam a pasta letras (A-Z); sílabas aparecem como texto.
   const promptLetter = isProduction ? (syllables.match(/\/([^/]+)\//)?.[1] ?? '') : '';
   const IPA_TO_LETTER: Record<string, string> = {
@@ -1707,14 +1743,9 @@ function SegmentationStepView({
       <div className="step-nav">
         <button className="btn btn-secondary" type="button" onClick={onBack}><IconArrowLeft /> Voltar</button>
         <button className="btn btn-primary" type="button" onClick={() => {
-          if (isSyllableChoice && currentUnit) {
-            const selectedCount = selectedSyllableCircles.length;
-            setUnit(currentUnit.itemNumber, {
-              childAnswer: String(selectedCount),
-              isCorrect: isCorrectSyllableSelection(selectedCount, syllables),
-              prompt: syllables,
-              expectedAnswer: word,
-            });
+          if (isSyllableChoice) {
+            setAskingJudgement(true);
+            return;
           }
           void onNext();
         }} disabled={!canContinue}>
@@ -1722,6 +1753,31 @@ function SegmentationStepView({
           <IconArrowRight />
         </button>
       </div>
+
+      <Modal
+        open={askingJudgement}
+        title="A criança acertou?"
+        onClose={() => setAskingJudgement(false)}
+        actions={
+          <>
+            <button className="btn btn-secondary" type="button" onClick={() => registerJudgement(false)}>
+              Errou
+            </button>
+            <button className="btn btn-primary" type="button" onClick={() => registerJudgement(true)}>
+              Acertou
+            </button>
+          </>
+        }
+      >
+        <p>
+          {word ? `Palavra: ${word}` : 'Registre o resultado deste item.'}
+          {syllables ? ` · ${syllables}` : ''}
+        </p>
+        <p>
+          A criança bateu em {selectedSyllableCircles.length}{' '}
+          {selectedSyllableCircles.length === 1 ? 'círculo' : 'círculos'}.
+        </p>
+      </Modal>
     </div>
   );
 }

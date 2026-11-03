@@ -86,6 +86,9 @@ model Child {
   grade            String?
   notes            String?
   doesNotRead      Boolean  @default(false)
+  // DHACA: habilidade de 1 a 5. Nulo em cadastro feito antes do campo existir
+  // e em cadastro onde o avaliador não informou.
+  dhaca            Int?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
