@@ -212,7 +212,7 @@ Produção roda na Vercel, com três peças que mudam por caminhos diferentes:
 
 | Peça | Onde vive | Como atualiza |
 | ---- | --------- | ------------- |
-| Código | GitHub → Vercel | push na `main` |
+| Código | Vercel (projetos `papl` e `papl-api`) | `npx vercel --prod` em cada pasta |
 | Banco | Prisma Postgres (`db.prisma.io`, schema `papl`) | script pontual, nunca o seed |
 | Figuras do protocolo | Vercel Blob, prefixo `papl` | `scripts/upload-storage.mjs` |
 
@@ -252,8 +252,22 @@ Ao final ele imprime o valor de `VITE_STORAGE_URL` para o projeto do front-end n
 **Figuras primeiro, banco depois.** Na ordem inversa, entre um passo e outro a tela pede uma
 figura que ainda não está na CDN e o avaliador vê imagem quebrada.
 
-O push na `main` não é pré-requisito para nenhum dos dois: o código só muda o que um seed novo
-geraria.
+Mudança de conteúdo do protocolo (exemplos, itens, figuras) não precisa de deploy: o front-end
+lê os textos da API a cada requisição e as figuras da CDN. O deploy só é necessário quando o
+código muda.
+
+### Deploy do código
+
+**Os projetos não têm integração com o GitHub.** O push na `main` não dispara nada; o deploy é
+manual, em cada pasta:
+
+```bash
+cd backend;  npx vercel --prod   # papl-api.vercel.app
+cd frontend; npx vercel --prod   # papl.vercel.app
+```
+
+O `--prod` atualiza o alias de produção sozinho. Como a publicação é manual, `main` e o que
+está no ar podem divergir — confira com `npx vercel ls <projeto>`.
 
 ### Apontando um script para o banco de produção
 
