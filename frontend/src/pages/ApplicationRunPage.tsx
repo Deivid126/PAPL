@@ -17,6 +17,14 @@ import { resumeCursor } from '../lib/resume';
 import { circleCountForPrompt, isCorrectSyllableSelection } from '../lib/syllableCircles';
 import { deriveSectionState } from '../lib/sectionProgress';
 
+/** Destino do seletor "Ir para": uma subetapa do protocolo, ou a revisão. */
+interface JumpTarget {
+  stepNumber: number;
+  substepOrder: number | null;
+  label: string;
+  section?: ApplicationSection;
+}
+
 interface Unit {
   itemNumber: number;
   substep: ProtocolSubstep;
@@ -140,6 +148,12 @@ export function ApplicationRunPage() {
   const [stepStatus, setStepStatus] = useState<string>('NOT_STARTED');
   const [confirmStepOpen, setConfirmStepOpen] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
+  // Seções reabertas para revisão pelo seletor "Ir para". Enquanto a seção
+  // está aqui ela deixa de contar como finalizada: dá para andar pelos itens,
+  // corrigir uma resposta já dada e responder o que ficou em branco. As
+  // respostas continuam como estavam — reabrir não apaga nada.
+  const [reopened, setReopened] = useState<Record<string, true>>({});
+  const [confirmReopen, setConfirmReopen] = useState<JumpTarget | null>(null);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedSignaturesRef = useRef<Record<string, string>>({});
   const flushChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -154,11 +168,21 @@ export function ApplicationRunPage() {
       ]);
       setApp(appRes);
       setProtocol(protocolRes);
-      setSectionStates(Object.fromEntries(
-        (appRes.steps ?? []).flatMap((step) =>
-          (step.sections ?? []).map((section) => [`${step.stepNumber}:${section.substepOrder}`, section]),
+      const loadedSections = (appRes.steps ?? []).flatMap((step) =>
+        (step.sections ?? []).map(
+          (section) => [`${step.stepNumber}:${section.substepOrder}`, section] as const,
         ),
-      ));
+      );
+      setSectionStates(Object.fromEntries(loadedSections));
+      // Revisão aberta antes de um reload continua aberta: a marca vem do
+      // servidor, não do estado local.
+      setReopened(
+        Object.fromEntries(
+          loadedSections
+            .filter(([, section]) => section.reopenedAt != null)
+            .map(([key]) => [key, true as const]),
+        ),
+      );
       const cursor = resumeCursor(appRes, protocolRes);
       if (cursor) {
         resumeStepRef.current = cursor.stepNumber;
@@ -267,12 +291,7 @@ export function ApplicationRunPage() {
 
   // Destinos de navegação rápida: cada subetapa do protocolo + revisão.
   const jumpTargets = useMemo(() => {
-    const targets: Array<{
-      stepNumber: number;
-      substepOrder: number | null;
-      label: string;
-      section?: ApplicationSection;
-    }> = [];
+    const targets: JumpTarget[] = [];
     for (const step of protocol) {
       for (const sub of step.substeps) {
         const section = sectionStates[`${step.stepNumber}:${sub.order}`];
@@ -312,8 +331,11 @@ export function ApplicationRunPage() {
     const section = targetUnit
       ? sectionStates[`${currentStep}:${targetUnit.substep.order}`]
       : undefined;
-    if (section?.status === 'FINALIZED') {
-      setModalError('Esta seção já foi finalizada nesta aplicação.');
+    const sectionKey = targetUnit ? `${currentStep}:${targetUnit.substep.order}` : '';
+    if (section?.status === 'FINALIZED' && !reopened[sectionKey]) {
+      setModalError(
+        'Esta seção já foi finalizada nesta aplicação. Para corrigir, volte a ela pelo seletor "Ir para".',
+      );
       return;
     }
     const key = String(itemNumber);
@@ -329,6 +351,9 @@ export function ApplicationRunPage() {
   function sectionIsFinalized(sectionUnits: Unit[]): boolean {
     const order = sectionUnits[0]?.substep.order;
     if (order == null) return false;
+    // Em revisão a seção se comporta como não finalizada: "Avançar" anda item
+    // a item em vez de pular para a próxima subetapa.
+    if (reopened[`${currentStep}:${order}`]) return false;
     const saved = sectionStates[`${currentStep}:${order}`];
     if (saved?.status === 'FINALIZED') return true;
     const answers = sectionUnits.map((unit) =>
@@ -336,6 +361,16 @@ export function ApplicationRunPage() {
     );
     return deriveSectionState(answers).status === 'FINALIZED';
   }
+
+  // Sair da tela cancela o salvamento agendado: sem isso o timer vence com a
+  // página já desmontada e dispara um POST fora de hora. Quem sai de verdade
+  // passa por handleSaveAndExit, que faz o flush antes.
+  useEffect(
+    () => () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    },
+    [],
+  );
 
   function queueSave() {
     setSaving(true);
@@ -592,16 +627,32 @@ export function ApplicationRunPage() {
 
   // Salta para uma subetapa: entra na prova no primeiro item sem resposta
   // quando a subetapa já tem respostas salvas; senão, começa no treino.
-  async function jumpTo(target: {
-    stepNumber: number;
-    substepOrder: number | null;
-    section?: ApplicationSection;
-  }) {
-    const section = target.substepOrder == null
-      ? undefined
-      : sectionStates[`${target.stepNumber}:${target.substepOrder}`];
-    if (section?.status === 'FINALIZED' || target.section?.status === 'FINALIZED') {
-      setModalError('Esta seção já foi finalizada nesta aplicação.');
+  async function jumpTo(target: JumpTarget, options?: { review?: boolean }) {
+    const sectionKey = target.substepOrder == null
+      ? null
+      : `${target.stepNumber}:${target.substepOrder}`;
+    const section = sectionKey == null ? undefined : sectionStates[sectionKey];
+    const finalized =
+      section?.status === 'FINALIZED' || target.section?.status === 'FINALIZED';
+    // Seção finalizada: confirma antes de reabrir, para o avaliador não cair
+    // na revisão sem querer ao escolher no seletor.
+    const review = options?.review ?? false;
+    if (finalized && !review && sectionKey != null && !reopened[sectionKey]) {
+      setConfirmReopen(target);
+      return;
+    }
+    try {
+      // O servidor também recusa gravação em seção finalizada, então a
+      // revisão precisa ser destravada lá antes de qualquer edição.
+      if (review && sectionKey != null && target.substepOrder != null) {
+        await api(
+          `/applications/${id}/steps/${target.stepNumber}/sections/${target.substepOrder}/reopen`,
+          { method: 'POST' },
+        );
+        setReopened((prev) => ({ ...prev, [sectionKey]: true }));
+      }
+    } catch (err) {
+      setModalError(errorMessage(err));
       return;
     }
     try {
@@ -631,8 +682,11 @@ export function ApplicationRunPage() {
         const st = statesRef.current[String(item.itemNumber)];
         return !(st && (st.isCorrect !== null || st.childAnswer !== '' || st.responseTimeMs != null));
       });
-      const localIndex = firstUnanswered >= 0 ? firstUnanswered : 0;
-      const startInTest = answered;
+      // Em revisão volta ao primeiro item da seção, com as respostas como
+      // estão; fora dela, retoma no primeiro item ainda sem resposta.
+      const reviewing = review || (sectionKey != null && reopened[sectionKey] === true);
+      const localIndex = reviewing ? 0 : firstUnanswered >= 0 ? firstUnanswered : 0;
+      const startInTest = reviewing || answered;
       if (stepNumber === 1) {
         setAlphabetGroup(target.substepOrder ?? 1);
         setAlphabetPhase(startInTest ? 'TEST' : 'TRAINING');
@@ -688,16 +742,12 @@ export function ApplicationRunPage() {
                 Parte...
               </option>
               {jumpTargets.map((target, i) => (
-                <option
-                  key={`${target.stepNumber}-${target.substepOrder}`}
-                  value={i}
-                  disabled={target.section?.status === 'FINALIZED'}
-                >
+                <option key={`${target.stepNumber}-${target.substepOrder}`} value={i}>
                   {target.label}
                   {target.section?.status === 'FINALIZED'
                     ? target.section.finalizedReason === 'ERROR_LIMIT'
-                      ? ' · Encerrada após 5 erros'
-                      : ' · Finalizada'
+                      ? ' · Encerrada após 5 erros — revisar'
+                      : ' · Finalizada — revisar'
                     : target.section?.status === 'IN_PROGRESS' ? ' · Em andamento' : ''}
                 </option>
               ))}
@@ -1079,6 +1129,42 @@ export function ApplicationRunPage() {
         }
       >
         <p>As respostas desta etapa serão salvas e a aplicação avançará na ordem do protocolo.</p>
+      </Modal>
+
+      <Modal
+        open={confirmReopen !== null}
+        title="Revisar esta seção?"
+        onClose={() => setConfirmReopen(null)}
+        actions={
+          <>
+            <button className="btn btn-secondary" type="button" onClick={() => setConfirmReopen(null)}>
+              Cancelar
+            </button>
+            <button
+              className="btn btn-primary"
+              type="button"
+              onClick={() => {
+                const target = confirmReopen;
+                setConfirmReopen(null);
+                if (target) void jumpTo(target, { review: true });
+              }}
+            >
+              Revisar respostas
+            </button>
+          </>
+        }
+      >
+        <p>
+          {confirmReopen?.label} já foi finalizada. A revisão volta ao primeiro item com as
+          respostas como estão; você pode corrigir o que já respondeu e preencher o que ficou
+          em branco.
+        </p>
+        {confirmReopen?.section?.finalizedReason === 'ERROR_LIMIT' ? (
+          <p>
+            Atenção: esta seção foi encerrada pela regra de parada do protocolo, após 5 erros
+            consecutivos. Só altere se houve engano no registro.
+          </p>
+        ) : null}
       </Modal>
 
       <Modal

@@ -123,6 +123,24 @@ export class ApplicationsController {
     return this.applicationsService.reopen(user.id, id);
   }
 
+  @Post(':id/steps/:stepNumber/sections/:substepOrder/reopen')
+  @ApiOperation({
+    summary: 'Destrava uma seção finalizada para revisão (não apaga respostas)',
+  })
+  reopenSection(
+    @CurrentUser() user: AuthenticatedUser,
+    @Param('id') id: string,
+    @Param('stepNumber') stepNumber: string,
+    @Param('substepOrder') substepOrder: string,
+  ) {
+    return this.applicationsService.reopenSection(
+      user.id,
+      id,
+      Number(stepNumber),
+      Number(substepOrder),
+    );
+  }
+
   @Get(':id/result')
   @ApiOperation({ summary: 'Resultado detalhado da aplicação' })
   result(@CurrentUser() user: AuthenticatedUser, @Param('id') id: string) {

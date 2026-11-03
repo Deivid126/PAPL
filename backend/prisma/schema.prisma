@@ -148,6 +148,10 @@ model ApplicationSection {
   consecutiveErrors Int              @default(0)
   startedAt         DateTime?
   finalizedAt       DateTime?
+  // Destravada para revisão pelo avaliador. Independe de status: a seção
+  // segue contando como FINALIZED no progresso e no resultado, mas aceita
+  // correção das respostas. Limpa quando a aplicação é finalizada.
+  reopenedAt        DateTime?
   createdAt         DateTime         @default(now())
   updatedAt         DateTime         @updatedAt
 

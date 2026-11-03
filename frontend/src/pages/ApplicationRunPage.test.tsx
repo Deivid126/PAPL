@@ -164,7 +164,7 @@ describe('ApplicationRunPage', () => {
     vi.spyOn(window, 'confirm').mockReturnValue(true);
   });
 
-  it('identifica e impede navegar para uma seção finalizada nesta aplicação', async () => {
+  it('oferece revisar uma seção finalizada e confirma antes de reabrir', async () => {
     const saved = makeApp(1);
     saved.steps![0].sections = [{
       id: 'section-vowels',
@@ -185,8 +185,39 @@ describe('ApplicationRunPage', () => {
     renderRun();
 
     const jumpSelect = await screen.findByLabelText('Ir para');
-    const finalizedOption = within(jumpSelect).getByRole('option', { name: /1\.1 Vogais · Encerrada após 5 erros/ });
-    expect(finalizedOption).toBeDisabled();
+    const finalizedOption = within(jumpSelect).getByRole('option', {
+      name: /1\.1 Vogais · Encerrada após 5 erros — revisar/,
+    });
+    // A seção finalizada deixa de ser um beco sem saída: dá para voltar a ela.
+    expect(finalizedOption).not.toBeDisabled();
+
+    fireEvent.change(jumpSelect, { target: { value: '0' } });
+
+    // Reabrir pede confirmação, e a parada por erro vem com o aviso do protocolo.
+    expect(await screen.findByText('Revisar esta seção?')).toBeInTheDocument();
+    expect(screen.getByText(/regra de parada do protocolo/)).toBeInTheDocument();
+    expect(apiMocks.api).not.toHaveBeenCalledWith(
+      expect.stringContaining('/sections/1/reopen'),
+      expect.anything(),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Revisar respostas' }));
+
+    await waitFor(() =>
+      expect(apiMocks.api).toHaveBeenCalledWith(
+        '/applications/app1/steps/1/sections/1/reopen',
+        { method: 'POST' },
+      ),
+    );
+
+    // Reabrir encadeia o salto para a seção, que marca a etapa como em
+    // andamento. Esperar aqui evita que essa chamada caia no teste seguinte.
+    await waitFor(() =>
+      expect(apiMocks.api).toHaveBeenCalledWith(
+        '/applications/app1/steps/1',
+        expect.objectContaining({ method: 'PATCH' }),
+      ),
+    );
   });
 
   it('não oferece cabelo como distrator quando o alvo é a cor amarela', async () => {

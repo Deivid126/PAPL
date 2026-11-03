@@ -152,7 +152,8 @@ export class ApplicationsService {
           },
         },
       });
-      if (section?.status === 'FINALIZED') {
+      // Seção reaberta para revisão aceita correção, mesmo finalizada.
+      if (section?.status === 'FINALIZED' && !section.reopenedAt) {
         throw new ForbiddenException('Esta seção já foi finalizada nesta aplicação.');
       }
       return;
@@ -183,7 +184,9 @@ export class ApplicationsService {
         responseTimeMs: null,
       });
       const current = sectionByOrder.get(substep.order);
-      if (current?.status === 'FINALIZED') continue;
+      // Uma seção finalizada não é recalculada — exceto em revisão, onde as
+      // respostas podem mudar e o estado precisa acompanhar.
+      if (current?.status === 'FINALIZED' && !current.reopenedAt) continue;
 
       const derived = deriveSectionState(answers, substep.items.length);
       const now = new Date();
@@ -600,6 +603,12 @@ export class ApplicationsService {
           data: { status: 'COMPLETED', completedAt: now },
         }),
       ),
+      // Finalizar a aplicação encerra as revisões em aberto: as seções
+      // voltam a recusar gravação até alguém reabri-las de novo.
+      this.prisma.applicationSection.updateMany({
+        where: { applicationStep: { applicationId: id }, reopenedAt: { not: null } },
+        data: { reopenedAt: null },
+      }),
     ]);
 
     return this.result(userId, id);
@@ -617,6 +626,45 @@ export class ApplicationsService {
         return !s.items.some((i) => i.responseTimeMs != null);
       }
       return s.items.length === 0 || s.status !== 'COMPLETED';
+    });
+  }
+
+  /**
+   * Destrava uma seção finalizada para revisão, sem apagar resposta alguma.
+   *
+   * O status continua FINALIZED — o progresso e o resultado não mudam por
+   * reabrir. O que muda é `reopenedAt`, que libera a gravação dos itens
+   * daquela seção. `complete()` limpa a marca de todas elas.
+   */
+  async reopenSection(
+    userId: string,
+    id: string,
+    stepNumber: number,
+    substepOrder: number,
+  ) {
+    await this.ensureOwned(userId, id);
+    const step = await this.prisma.applicationStep.findFirst({
+      where: { applicationId: id, stepNumber },
+      select: { id: true },
+    });
+    if (!step) {
+      throw new NotFoundException('Etapa não encontrada nesta aplicação.');
+    }
+    const section = await this.prisma.applicationSection.findUnique({
+      where: {
+        applicationStepId_substepOrder: {
+          applicationStepId: step.id,
+          substepOrder,
+        },
+      },
+    });
+    if (!section) {
+      throw new NotFoundException('Seção não encontrada nesta aplicação.');
+    }
+    if (section.reopenedAt) return section;
+    return this.prisma.applicationSection.update({
+      where: { id: section.id },
+      data: { reopenedAt: new Date() },
     });
   }
 

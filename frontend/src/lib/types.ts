@@ -103,6 +103,8 @@ export interface ApplicationSection {
   consecutiveErrors: number;
   startedAt: string | null;
   finalizedAt: string | null;
+  /** Destravada para revisão: aceita correção mesmo finalizada. */
+  reopenedAt?: string | null;
 }
 
 export interface ApplicationItem {
