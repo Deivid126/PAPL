@@ -18,6 +18,7 @@
  */
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
+import { segmentationTrainingExamples } from './data/segmentation-training';
 
 const prisma = new PrismaClient();
 
@@ -70,13 +71,8 @@ const SYNTHESIS_ITEMS = [
   ['/pe/ /ri/ /\'go/ /zo/', 'perigoso', 'perigoso.png'],
 ] as const;
 
-// Segmentação silábica — tabela do protocolo (treino + prova).
+// Segmentação silábica — tabela do protocolo (treino em prisma/data, prova aqui).
 // Formato: [palavra, prompt de sílabas, arquivo de imagem]
-const SEGMENTATION_TRAINING: Array<[string, string, string | null]> = [
-  ['bala', `/"ba/ -/la/`, 'bala.png'],
-  ['martelo', `/mar/-/'te/-/lo/`, 'martelo.png'],
-];
-
 const SEGMENTATION_ITEMS: Array<[string, string, string]> = [
   ['vaca', `/"va/ -/ka/`, 'vaca.png'],
   ['coração', `/ko/ -/ra/ -/'são/`, 'coracao.png'],
@@ -312,7 +308,7 @@ async function seedProtocol() {
             m.order === 1
               ? SYNTHESIS_TRAINING.map((item) => `${item.label}|${item.syllables}|${item.answer}|${item.image}`)
               : m.order === 2
-              ? SEGMENTATION_TRAINING.map(([word, syllables, image], i) => `Exemplo ${i + 1}|${syllables}|${word}|${image ?? ''}`)
+              ? segmentationTrainingExamples()
               : m.order === 3
               ? PHONEME_TRAINING.map(([word, prompt, image], i) => `Exemplo ${i + 1}|${prompt}|${word}|${image}`)
               : m.order === 4

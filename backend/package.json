@@ -17,6 +17,7 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:push": "prisma db push",
     "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:update-segmentation-training": "ts-node prisma/update-segmentation-training.ts",
     "db:push": "prisma db push",
     "seed": "prisma db seed",
     "test": "jest",
