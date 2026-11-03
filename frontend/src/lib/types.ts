@@ -194,6 +194,10 @@ export interface ProgressSubstep {
   answeredItems: number;
   correctItems: number;
   wrongItems: number;
+  /** Quando a primeira resposta da seção foi registrada; nulo sem respostas. */
+  firstAnswerAt?: string | null;
+  /** Última vez que alguma resposta da seção foi gravada ou corrigida. */
+  lastAnswerAt?: string | null;
   items: ProgressItem[];
 }
 

@@ -473,11 +473,39 @@ export class ApplicationsService {
       await this.assertSectionOpen(step.id, protocolStep, item.itemNumber);
     }
 
-    const items = await this.prisma.$transaction(
-      dto.items.map((item: SaveStepItemDto) =>
-        this.prisma.applicationItem.upsert(this.itemUpsertArgs(step.id, item)),
-      ),
-    );
+    // Regravar item idêntico empurra o updatedAt e estraga a data da última
+    // resposta da seção: ao abrir a tela o autosave reenvia tudo que já estava
+    // salvo. Só vai ao banco o que de fato mudou.
+    const existing = await this.prisma.applicationItem.findMany({
+      where: {
+        applicationStepId: step.id,
+        itemNumber: { in: dto.items.map((item) => item.itemNumber) },
+      },
+    });
+    const existingByNumber = new Map(existing.map((item) => [item.itemNumber, item]));
+    const changed = dto.items.filter((item: SaveStepItemDto) => {
+      const current = existingByNumber.get(item.itemNumber);
+      if (!current) return true;
+      const { update } = this.itemUpsertArgs(step.id, item);
+      return Object.entries(update).some(
+        ([field, value]) => (current as Record<string, unknown>)[field] !== value,
+      );
+    });
+
+    if (changed.length > 0) {
+      await this.prisma.$transaction(
+        changed.map((item: SaveStepItemDto) =>
+          this.prisma.applicationItem.upsert(this.itemUpsertArgs(step.id, item)),
+        ),
+      );
+    }
+    const items = await this.prisma.applicationItem.findMany({
+      where: {
+        applicationStepId: step.id,
+        itemNumber: { in: dto.items.map((item) => item.itemNumber) },
+      },
+      orderBy: { itemNumber: 'asc' },
+    });
 
     const updatedStep = await this.recomputeStepScore(step.id, stepNumber);
     await this.syncSectionStates(step.id, protocolStep);
@@ -837,6 +865,8 @@ export class ApplicationsService {
       isCorrect: boolean | null;
       responseTimeMs: number | null;
       notes: string | null;
+      createdAt?: Date;
+      updatedAt?: Date;
     }>,
   ) {
     if (!protocolStep) return null;
@@ -862,8 +892,24 @@ export class ApplicationsService {
           isCorrect: answered ? answer?.isCorrect ?? null : null,
           answered,
           notes: answer?.notes ?? null,
+          // Guardadas para datar a seção: a linha do item nasce no primeiro
+          // salvamento daquela resposta e é tocada a cada correção.
+          createdAt: answered ? answer?.createdAt ?? null : null,
+          updatedAt: answered ? answer?.updatedAt ?? null : null,
         };
       });
+
+      // Quando a seção foi respondida: da primeira resposta registrada à
+      // última mexida. Sem resposta nenhuma, as duas ficam nulas.
+      const answeredTimes = items.filter((item) => item.answered);
+      const firstAnswerAt = answeredTimes
+        .map((item) => item.createdAt)
+        .filter((at): at is Date => at != null)
+        .reduce<Date | null>((min, at) => (min == null || at < min ? at : min), null);
+      const lastAnswerAt = answeredTimes
+        .map((item) => item.updatedAt)
+        .filter((at): at is Date => at != null)
+        .reduce<Date | null>((max, at) => (max == null || at > max ? at : max), null);
       return {
         order: sub.order,
         title: sub.title,
@@ -873,7 +919,9 @@ export class ApplicationsService {
         answeredItems: items.filter((item) => item.answered).length,
         correctItems: items.filter((item) => item.isCorrect === true).length,
         wrongItems: items.filter((item) => item.isCorrect === false).length,
-        items,
+        firstAnswerAt: firstAnswerAt?.toISOString() ?? null,
+        lastAnswerAt: lastAnswerAt?.toISOString() ?? null,
+        items: items.map(({ createdAt: _c, updatedAt: _u, ...item }) => item),
       };
     });
     return {

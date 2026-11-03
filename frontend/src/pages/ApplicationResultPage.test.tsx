@@ -171,6 +171,8 @@ describe('ApplicationResultPage', () => {
               answeredItems: 6,
               correctItems: 1,
               wrongItems: 5,
+              firstAnswerAt: '2026-10-01T13:05:00.000Z',
+              lastAnswerAt: '2026-10-01T13:22:00.000Z',
               items: [],
             },
             {
@@ -211,6 +213,21 @@ describe('ApplicationResultPage', () => {
     expect(table.queryByText('FINALIZED')).not.toBeInTheDocument();
     expect(table.getAllByText('Em andamento').length).toBeGreaterThan(0);
     expect(table.getByText(/5 erros seguidos/)).toBeInTheDocument();
+
+    // Quando a seção foi respondida, da primeira à última resposta. O
+    // esperado é calculado no mesmo fuso da máquina que roda o teste.
+    const asLocal = (iso: string) => new Date(iso).toLocaleString('pt-BR');
+    const sintese = table.getByRole('cell', { name: '2.1' }).closest('tr');
+    expect(
+      within(sintese as HTMLElement).getByText(asLocal('2026-10-01T13:05:00.000Z')),
+    ).toBeInTheDocument();
+    expect(
+      within(sintese as HTMLElement).getByText(asLocal('2026-10-01T13:22:00.000Z')),
+    ).toBeInTheDocument();
+
+    // Seção sem resposta não inventa data.
+    const segmentacao = table.getByRole('cell', { name: '2.2' }).closest('tr');
+    expect(within(segmentacao as HTMLElement).getAllByText('—').length).toBeGreaterThanOrEqual(2);
   });
 
   it('exibe a quantidade de círculos esperada na segmentação respondida por toque', async () => {

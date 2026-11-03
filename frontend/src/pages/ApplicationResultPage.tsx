@@ -1,10 +1,28 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
-import type { ApplicationResult } from '../lib/types';
-import { Alert, Spinner, StatusBadge } from '../components/ui';
-import { formatDate, formatTimerMs } from '../lib/format';
+import type { ApplicationResult, ProgressSubstep } from '../lib/types';
+import { Alert, Spinner, StatusBadge, statusLabel } from '../components/ui';
+import { formatDate, formatDateTime, formatTimerMs } from '../lib/format';
 import { countSyllables } from '../lib/syllableCircles';
+
+/**
+ * Janela de resposta da etapa: a primeira resposta da seção mais antiga e a
+ * última mexida na seção mais recente. Derivada das seções para não repetir
+ * a conta no servidor.
+ */
+function stepAnswerRange(step: { substeps?: ProgressSubstep[] }): {
+  first: string | null;
+  last: string | null;
+} {
+  const subs = step.substeps ?? [];
+  const firsts = subs.map((sub) => sub.firstAnswerAt).filter((at): at is string => !!at);
+  const lasts = subs.map((sub) => sub.lastAnswerAt).filter((at): at is string => !!at);
+  return {
+    first: firsts.length > 0 ? firsts.reduce((min, at) => (at < min ? at : min)) : null,
+    last: lasts.length > 0 ? lasts.reduce((max, at) => (at > max ? at : max)) : null,
+  };
+}
 
 /** Etapa 3 é a cronometrada: pontua por tempo, não por item. */
 const TIMER_STEP = 3;
@@ -150,6 +168,8 @@ export function ApplicationResultPage() {
                 <th scope="col">Pontuação</th>
                 <th scope="col">Itens respondidos</th>
                 <th scope="col">Tempo</th>
+                <th scope="col">1ª resposta</th>
+                <th scope="col">Última resposta</th>
                 <th scope="col">Status</th>
               </tr>
             </thead>
@@ -167,6 +187,8 @@ export function ApplicationResultPage() {
                       {s.totalItems != null ? `${s.answeredItems} de ${s.totalItems}` : s.answeredItems}
                     </td>
                     <td>{s.timerMs != null ? formatTimerMs(s.timerMs) : '—'}</td>
+                    <td>{formatDateTime(stepAnswerRange(s).first)}</td>
+                    <td>{formatDateTime(stepAnswerRange(s).last)}</td>
                     <td><StatusBadge status={s.status} /></td>
                   </tr>
                   {/* Uma linha por seção: a etapa sozinha esconde onde a
@@ -187,6 +209,8 @@ export function ApplicationResultPage() {
                       </td>
                       <td>{sub.answeredItems} de {sub.totalItems}</td>
                       <td>{s.stepNumber === TIMER_STEP && s.timerMs != null ? formatTimerMs(s.timerMs) : '—'}</td>
+                      <td>{formatDateTime(sub.firstAnswerAt)}</td>
+                      <td>{formatDateTime(sub.lastAnswerAt)}</td>
                       <td>
                         <StatusBadge status={sub.status ?? 'NOT_STARTED'} />
                         {sub.status === 'FINALIZED' && sub.finalizedReason === 'ERROR_LIMIT' && (
@@ -213,6 +237,12 @@ export function ApplicationResultPage() {
                 s.substeps?.map((sub) => (
                   <div className="progress-substep" key={sub.order}>
                     <h4>{sub.title}</h4>
+                    <p className="progress-count">
+                      Situação: {statusLabel(sub.status)}
+                      {sub.firstAnswerAt ? ` · 1ª resposta em ${formatDateTime(sub.firstAnswerAt)}` : ''}
+                      {sub.lastAnswerAt ? ` · última em ${formatDateTime(sub.lastAnswerAt)}` : ''}
+                      {!sub.firstAnswerAt ? ' · nenhuma resposta registrada' : ''}
+                    </p>
                     {sub.status === 'FINALIZED' && (
                       <p className="progress-count">
                         {sub.finalizedReason === 'ERROR_LIMIT'
