@@ -30,17 +30,28 @@ export function EmptyState({
   );
 }
 
-const STATUS_LABEL: Record<string, string> = {
+/**
+ * Rótulo em português de todo status que chega da API — de aplicação, etapa
+ * ou seção. Nenhuma tela deve imprimir o valor cru: é o que fazia aparecer
+ * IN_PROGRESS para o avaliador.
+ */
+export const STATUS_LABEL: Record<string, string> = {
   DRAFT: 'Rascunho',
   IN_PROGRESS: 'Em andamento',
   COMPLETED: 'Finalizada',
   ARCHIVED: 'Arquivada',
   NOT_STARTED: 'Não iniciada',
+  FINALIZED: 'Finalizada',
 };
+
+export function statusLabel(status: string | null | undefined): string {
+  if (!status) return 'Não iniciada';
+  return STATUS_LABEL[status] ?? status;
+}
 
 export function StatusBadge({ status }: { status: string }) {
   const cls = `status-badge status-${status.toLowerCase()}`;
-  return <span className={cls}>{STATUS_LABEL[status] ?? status}</span>;
+  return <span className={cls}>{statusLabel(status)}</span>;
 }
 
 export function ProgressBar({ value, max, label }: { value: number; max: number; label?: string }) {

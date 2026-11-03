@@ -1,10 +1,13 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { ApplicationResult } from '../lib/types';
 import { Alert, Spinner, StatusBadge } from '../components/ui';
 import { formatDate, formatTimerMs } from '../lib/format';
 import { countSyllables } from '../lib/syllableCircles';
+
+/** Etapa 3 é a cronometrada: pontua por tempo, não por item. */
+const TIMER_STEP = 3;
 
 const SKILL_LABELS: Record<string, string> = {
   conhecimento_alfabeto: 'Conhecimento do alfabeto',
@@ -75,8 +78,8 @@ export function ApplicationResultPage() {
     );
   }
 
-  const scoredSteps = result.steps.filter((s) => s.stepNumber !== 3);
-  const timerStep = result.steps.find((s) => s.stepNumber === 3);
+  const scoredSteps = result.steps.filter((s) => s.stepNumber !== TIMER_STEP);
+  const timerStep = result.steps.find((s) => s.stepNumber === TIMER_STEP);
 
   return (
     <div className="page">
@@ -137,9 +140,9 @@ export function ApplicationResultPage() {
       </section>
 
       <section className="panel">
-        <h2>Detalhes por etapa</h2>
+        <h2>Detalhes por etapa e seção</h2>
         <div className="table-responsive">
-          <table className="table">
+          <table className="table" aria-label="Detalhes por etapa e seção">
             <thead>
               <tr>
                 <th scope="col">Etapa</th>
@@ -152,19 +155,47 @@ export function ApplicationResultPage() {
             </thead>
             <tbody>
               {result.steps.map((s) => (
-                <tr key={s.stepNumber}>
-                  <td>{s.stepNumber}</td>
-                  <td>{SKILL_LABELS[s.skill] ?? s.skill}</td>
-                  <td>
-                    <strong>{s.score}</strong>
-                    {s.maxScore != null ? ` / ${s.maxScore}` : ''}
-                  </td>
-                  <td>
-                    {s.totalItems != null ? `${s.answeredItems} de ${s.totalItems}` : s.answeredItems}
-                  </td>
-                  <td>{s.timerMs != null ? formatTimerMs(s.timerMs) : '—'}</td>
-                  <td>{s.status === 'COMPLETED' ? 'Concluída' : s.status}</td>
-                </tr>
+                <Fragment key={s.stepNumber}>
+                  <tr className="result-row-step">
+                    <td>{s.stepNumber}</td>
+                    <td>{SKILL_LABELS[s.skill] ?? s.skill}</td>
+                    <td>
+                      <strong>{s.score}</strong>
+                      {s.maxScore != null ? ` / ${s.maxScore}` : ''}
+                    </td>
+                    <td>
+                      {s.totalItems != null ? `${s.answeredItems} de ${s.totalItems}` : s.answeredItems}
+                    </td>
+                    <td>{s.timerMs != null ? formatTimerMs(s.timerMs) : '—'}</td>
+                    <td><StatusBadge status={s.status} /></td>
+                  </tr>
+                  {/* Uma linha por seção: a etapa sozinha esconde onde a
+                      criança foi bem e onde parou. */}
+                  {(s.substeps ?? []).map((sub) => (
+                    <tr className="result-row-substep" key={`${s.stepNumber}.${sub.order}`}>
+                      <td>{s.stepNumber}.{sub.order}</td>
+                      <td>{sub.title.replace(/^\d+\.\d+\s*/, '')}</td>
+                      <td>
+                        {s.stepNumber === TIMER_STEP ? (
+                          '—'
+                        ) : (
+                          <>
+                            <strong>{sub.correctItems}</strong>
+                            {` / ${sub.totalItems}`}
+                          </>
+                        )}
+                      </td>
+                      <td>{sub.answeredItems} de {sub.totalItems}</td>
+                      <td>{s.stepNumber === TIMER_STEP && s.timerMs != null ? formatTimerMs(s.timerMs) : '—'}</td>
+                      <td>
+                        <StatusBadge status={sub.status ?? 'NOT_STARTED'} />
+                        {sub.status === 'FINALIZED' && sub.finalizedReason === 'ERROR_LIMIT' && (
+                          <span className="muted"> · 5 erros seguidos</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
               ))}
             </tbody>
           </table>

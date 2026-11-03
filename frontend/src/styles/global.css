@@ -545,6 +545,29 @@ textarea.input {
   border-top: 2px solid var(--color-border);
 }
 
+/* Detalhes por etapa e seção: a etapa é o cabeçalho do bloco e as seções
+   ficam recuadas abaixo dela, para a hierarquia 2 → 2.1 → 2.2 se ler de
+   relance. */
+.result-row-step td {
+  font-weight: 600;
+  border-bottom-width: 0;
+}
+
+.result-row-substep td {
+  color: var(--color-text-muted);
+  font-size: 0.88rem;
+  padding-block: 0.45rem;
+}
+
+.result-row-substep td:first-child {
+  padding-left: 1.75rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.result-row-substep + .result-row-step td {
+  border-top: 1px solid var(--color-border);
+}
+
 .child-name {
   display: block;
   font-weight: 600;

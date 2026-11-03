@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { ApplicationResultPage } from './ApplicationResultPage';
 
@@ -140,6 +140,77 @@ describe('ApplicationResultPage', () => {
     expect(screen.getByText('Erro')).toBeInTheDocument();
     expect(screen.getAllByText('Não respondida')).toHaveLength(2);
     expect(screen.getByText(/2 exemplos, contados à parte/)).toBeInTheDocument();
+  });
+
+  it('detalha o resumo por seção e nomeia os status em português', async () => {
+    apiMocks.api.mockImplementation(async () => ({
+      ...result,
+      status: 'IN_PROGRESS',
+      completedAt: null,
+      steps: [
+        {
+          stepNumber: 2,
+          skill: 'habilidades_metafonologicas',
+          status: 'IN_PROGRESS',
+          score: 5,
+          maxScore: 42,
+          completedAt: null,
+          timerMs: null,
+          answeredItems: 8,
+          totalItems: 42,
+          notes: null,
+          substeps: [
+            {
+              order: 1,
+              title: '2.1 Síntese silábica',
+              status: 'FINALIZED',
+              finalizedReason: 'ERROR_LIMIT',
+              exampleCount: 0,
+              examples: [],
+              totalItems: 21,
+              answeredItems: 6,
+              correctItems: 1,
+              wrongItems: 5,
+              items: [],
+            },
+            {
+              order: 2,
+              title: '2.2 Segmentação silábica',
+              status: 'IN_PROGRESS',
+              finalizedReason: null,
+              exampleCount: 0,
+              examples: [],
+              totalItems: 21,
+              answeredItems: 2,
+              correctItems: 2,
+              wrongItems: 0,
+              items: [],
+            },
+          ],
+        },
+      ],
+    }));
+
+    render(
+      <MemoryRouter initialEntries={['/applications/app1/result']}>
+        <Routes>
+          <Route path="/applications/:id/result" element={<ApplicationResultPage />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    const table = within(await screen.findByRole('table', { name: 'Detalhes por etapa e seção' }));
+    // A etapa sozinha não dizia onde a criança foi bem; agora cada seção tem linha.
+    expect(table.getByRole('cell', { name: '2' })).toBeInTheDocument();
+    expect(table.getByRole('cell', { name: '2.1' })).toBeInTheDocument();
+    expect(table.getByRole('cell', { name: '2.2' })).toBeInTheDocument();
+    expect(table.getByRole('cell', { name: 'Síntese silábica' })).toBeInTheDocument();
+
+    // Nenhum status cru para o avaliador.
+    expect(table.queryByText('IN_PROGRESS')).not.toBeInTheDocument();
+    expect(table.queryByText('FINALIZED')).not.toBeInTheDocument();
+    expect(table.getAllByText('Em andamento').length).toBeGreaterThan(0);
+    expect(table.getByText(/5 erros seguidos/)).toBeInTheDocument();
   });
 
   it('exibe a quantidade de círculos esperada na segmentação respondida por toque', async () => {

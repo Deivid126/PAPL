@@ -10,7 +10,7 @@ import type {
   ProtocolStep,
   ProtocolSubstep,
 } from '../lib/types';
-import { Alert, Modal, ProgressBar, Spinner } from '../components/ui';
+import { Alert, Modal, ProgressBar, Spinner, statusLabel } from '../components/ui';
 import { IconArrowLeft, IconArrowRight, IconClock, IconSave } from '../components/Icons';
 import { formatDate } from '../lib/format';
 import { resumeCursor } from '../lib/resume';
@@ -2381,7 +2381,7 @@ function ReviewView({
             {steps.map((s) => (
               <tr key={s.id}>
                 <td>{s.stepNumber} — {SKILL_LABELS[s.skill] ?? s.skill}</td>
-                <td>{s.status === 'COMPLETED' ? 'Concluída' : s.status === 'IN_PROGRESS' ? 'Em andamento' : 'Não iniciada'}</td>
+                <td>{statusLabel(s.status)}</td>
                 <td>{s.score}{s.maxScore != null ? ` / ${s.maxScore}` : ''}</td>
                 <td>{s.items.length}</td>
                 <td>{s.stepNumber === 3 ? (s.items[0]?.responseTimeMs != null ? `${(s.items[0].responseTimeMs / 1000).toFixed(1)} s` : '—') : '—'}</td>
