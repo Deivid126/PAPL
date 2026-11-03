@@ -107,7 +107,8 @@ O Vite faz proxy de `/api` para `http://localhost:3000`. Em produção, defina
 | `npm run test`                | Executa os testes automatizados          |
 | `npm run lint`                | Lint (ESLint)                            |
 | `npm run prisma:migrate`      | `prisma migrate dev` (cria migrations)   |
-| `npm run seed`                | Popula o banco com o protocolo e dev user |
+| `npm run seed`                | Popula o banco com o protocolo e dev user (apaga aplicações — ver Deploy) |
+| `npm run prisma:update-segmentation-training` | Atualiza só os exemplos de treino da segmentação silábica |
 | `npm run start:dev`           | Sobe o serviço em modo desenvolvimento   |
 
 Back-end (testes): `npm test`. Front-end (testes): `npm test`.
@@ -204,6 +205,68 @@ Na interface, esses itens são marcados como “Aguardando conferência” e o a
 digitar o material apresentado diretamente no formulário durante a aplicação. Para fornecer
 o conteúdo permanente, edite a tabela `ProtocolItem` (campo administrativo) ou forneça o PDF
 para transcrição e atualize o seed.
+
+## Deploy em produção
+
+Produção roda na Vercel, com três peças que mudam por caminhos diferentes:
+
+| Peça | Onde vive | Como atualiza |
+| ---- | --------- | ------------- |
+| Código | GitHub → Vercel | push na `main` |
+| Banco | Prisma Postgres (`db.prisma.io`, schema `papl`) | script pontual, nunca o seed |
+| Figuras do protocolo | Vercel Blob, prefixo `papl` | `scripts/upload-storage.mjs` |
+
+O `backend/storage/` é `.gitignore`-ado e não existe no runtime serverless. Em produção o
+front-end monta a URL das figuras como `${VITE_STORAGE_URL}/${imageKey}`, lendo direto da CDN
+do Blob — o `imageKey` vem do banco sem o prefixo, então o prefixo entra na base.
+
+### Nunca rode o seed contra produção
+
+`prisma/seed.ts` faz `deleteMany` em `ProtocolStep`, e `ApplicationStep` referencia
+`ProtocolStep` com `onDelete: Cascade`. Rodá-lo em um banco com aplicações registradas
+**apaga as aplicações e as respostas junto**. O seed serve para banco novo ou de
+desenvolvimento.
+
+Para alterar conteúdo do protocolo em um banco que já tem dados, escreva um script que faça
+`update` do campo específico. `prisma/update-segmentation-training.ts` é o modelo: localiza a
+subetapa, confere o título antes de escrever e atualiza um campo só.
+
+### Atualizando figuras do protocolo
+
+Coloque os arquivos em `backend/storage/<pasta-da-tarefa>/` e envie para o Blob:
+
+```bash
+cd scripts
+node --env-file=.env.local upload-storage.mjs --dry-run  # confere o que vai subir
+node --env-file=.env.local upload-storage.mjs
+```
+
+Requer `BLOB_READ_WRITE_TOKEN` (Vercel > Storage > Blob store > Tokens). O script varre a
+pasta inteira e sobe tudo com `addRandomSuffix: false`: sobrescreve pela mesma chave e não
+apaga nada. Reenviar os 200+ arquivos existentes é inofensivo.
+
+Ao final ele imprime o valor de `VITE_STORAGE_URL` para o projeto do front-end na Vercel.
+
+### Ordem dos passos
+
+**Figuras primeiro, banco depois.** Na ordem inversa, entre um passo e outro a tela pede uma
+figura que ainda não está na CDN e o avaliador vê imagem quebrada.
+
+O push na `main` não é pré-requisito para nenhum dos dois: o código só muda o que um seed novo
+geraria.
+
+### Apontando um script para o banco de produção
+
+A conexão de produção está em `backend/.env.production`. O `POSTGRES_URL` que a CLI da Vercel
+grava em `scripts/.env.local` aponta para o mesmo host **sem** `schema=papl`, cai no schema
+`public` e falha com `P2021 table does not exist` — use sempre o `.env.production`.
+
+```powershell
+cd backend
+$env:DATABASE_URL = ((Get-Content .env.production | Select-String '^DATABASE_URL=') -split '=',2)[1].Trim('"')
+npx ts-node prisma/update-segmentation-training.ts
+Remove-Item Env:DATABASE_URL   # a variável vale para o resto da aba
+```
 
 ## Classificação de risco
 
