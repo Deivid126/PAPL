@@ -132,34 +132,6 @@ export class ApplicationsService {
     return protocolStep;
   }
 
-  private async assertSectionOpen(
-    applicationStepId: string,
-    protocolStep: Awaited<ReturnType<ProtocolService['listSteps']>>[number] | null,
-    itemNumber: number,
-  ) {
-    if (!protocolStep) return;
-    let globalItemNumber = 0;
-    for (const substep of protocolStep.substeps) {
-      const first = globalItemNumber + 1;
-      globalItemNumber += substep.items.length;
-      if (itemNumber < first || itemNumber > globalItemNumber) continue;
-
-      const section = await this.prisma.applicationSection.findUnique({
-        where: {
-          applicationStepId_substepOrder: {
-            applicationStepId,
-            substepOrder: substep.order,
-          },
-        },
-      });
-      // Seção reaberta para revisão aceita correção, mesmo finalizada.
-      if (section?.status === 'FINALIZED' && !section.reopenedAt) {
-        throw new ForbiddenException('Esta seção já foi finalizada nesta aplicação.');
-      }
-      return;
-    }
-  }
-
   private async syncSectionStates(
     applicationStepId: string,
     protocolStep: Awaited<ReturnType<ProtocolService['listSteps']>>[number] | null,
@@ -183,11 +155,9 @@ export class ApplicationsService {
         childAnswer: null,
         responseTimeMs: null,
       });
+      // O estado acompanha as respostas a cada gravação: a seção não trava
+      // mais, então uma resposta corrigida pode reabrir ou encerrar a seção.
       const current = sectionByOrder.get(substep.order);
-      // Uma seção finalizada não é recalculada — exceto em revisão, onde as
-      // respostas podem mudar e o estado precisa acompanhar.
-      if (current?.status === 'FINALIZED' && !current.reopenedAt) continue;
-
       const derived = deriveSectionState(answers, substep.items.length);
       const now = new Date();
       await this.prisma.applicationSection.upsert({
@@ -393,9 +363,6 @@ export class ApplicationsService {
       dto,
       current as Record<string, unknown> | undefined,
     );
-    if (wouldChange) {
-      await this.assertSectionOpen(step.id, protocolStep, dto.itemNumber);
-    }
 
     const item = wouldChange
       ? await this.prisma.applicationItem.upsert(this.itemUpsertArgs(step.id, dto))
@@ -420,10 +387,9 @@ export class ApplicationsService {
   /**
    * Diz se gravar este item mudaria alguma coisa.
    *
-   * Importa para a trava de seção finalizada: o cliente reenvia respostas já
-   * salvas (ao abrir a aplicação as assinaturas de autosave começam vazias), e
-   * recusar um reenvio que não altera nada derrubava o lote inteiro — inclusive
-   * a resposta que o avaliador acabara de dar em outra seção, aberta.
+   * O cliente reenvia respostas já salvas (ao abrir a aplicação as assinaturas
+   * de autosave começam vazias); regravar o que não mudou só empurraria o
+   * updatedAt e estragaria a data da última resposta da seção.
    */
   private itemWouldChange(
     applicationStepId: string,
@@ -520,12 +486,6 @@ export class ApplicationsService {
         existingByNumber.get(item.itemNumber) as Record<string, unknown> | undefined,
       ),
     );
-
-    // A seção fechada só barra alteração de verdade. Barrar reenvio idêntico
-    // derrubava o lote todo e travava o avaliador numa seção aberta.
-    for (const item of changed) {
-      await this.assertSectionOpen(step.id, protocolStep, item.itemNumber);
-    }
 
     if (changed.length > 0) {
       await this.prisma.$transaction(
@@ -666,12 +626,6 @@ export class ApplicationsService {
           data: { status: 'COMPLETED', completedAt: now },
         }),
       ),
-      // Finalizar a aplicação encerra as revisões em aberto: as seções
-      // voltam a recusar gravação até alguém reabri-las de novo.
-      this.prisma.applicationSection.updateMany({
-        where: { applicationStep: { applicationId: id }, reopenedAt: { not: null } },
-        data: { reopenedAt: null },
-      }),
     ]);
 
     return this.result(userId, id);
@@ -692,45 +646,6 @@ export class ApplicationsService {
     });
   }
 
-  /**
-   * Destrava uma seção finalizada para revisão, sem apagar resposta alguma.
-   *
-   * O status continua FINALIZED — o progresso e o resultado não mudam por
-   * reabrir. O que muda é `reopenedAt`, que libera a gravação dos itens
-   * daquela seção. `complete()` limpa a marca de todas elas.
-   */
-  async reopenSection(
-    userId: string,
-    id: string,
-    stepNumber: number,
-    substepOrder: number,
-  ) {
-    await this.ensureOwned(userId, id);
-    const step = await this.prisma.applicationStep.findFirst({
-      where: { applicationId: id, stepNumber },
-      select: { id: true },
-    });
-    if (!step) {
-      throw new NotFoundException('Etapa não encontrada nesta aplicação.');
-    }
-    const section = await this.prisma.applicationSection.findUnique({
-      where: {
-        applicationStepId_substepOrder: {
-          applicationStepId: step.id,
-          substepOrder,
-        },
-      },
-    });
-    if (!section) {
-      throw new NotFoundException('Seção não encontrada nesta aplicação.');
-    }
-    if (section.reopenedAt) return section;
-    return this.prisma.applicationSection.update({
-      where: { id: section.id },
-      data: { reopenedAt: new Date() },
-    });
-  }
-
   async reopen(userId: string, id: string) {
     const app = await this.ensureOwned(userId, id);
     if (app.status !== 'COMPLETED' && app.status !== 'ARCHIVED') {
@@ -738,30 +653,17 @@ export class ApplicationsService {
         'Apenas aplicações finalizadas podem ser reabertas.',
       );
     }
-    const [updated] = await this.prisma.$transaction([
-      this.prisma.application.update({
-        where: { id },
-        data: {
-          status: 'IN_PROGRESS',
-          completedAt: null,
-          totalScore: null,
-          classification: null,
-        },
-      }),
-      this.prisma.applicationSection.updateMany({
-        where: {
-          applicationStep: { applicationId: id },
-          status: 'FINALIZED',
-        },
-        data: {
-          status: 'IN_PROGRESS',
-          finalizedReason: null,
-          consecutiveErrors: 0,
-          finalizedAt: null,
-        },
-      }),
-    ]);
-    return updated;
+    // As seções ficam como estão: o estado delas é derivado das respostas e
+    // não trava a edição.
+    return this.prisma.application.update({
+      where: { id },
+      data: {
+        status: 'IN_PROGRESS',
+        completedAt: null,
+        totalScore: null,
+        classification: null,
+      },
+    });
   }
 
   async result(userId: string, id: string) {

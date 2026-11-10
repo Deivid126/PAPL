@@ -2,7 +2,7 @@ import { Fragment, useCallback, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import type { ApplicationResult, ProgressSubstep } from '../lib/types';
-import { Alert, Spinner, StatusBadge, statusLabel } from '../components/ui';
+import { Alert, Spinner, StatusBadge } from '../components/ui';
 import { formatDate, formatDateTime, formatTimerMs } from '../lib/format';
 import { countSyllables } from '../lib/syllableCircles';
 
@@ -26,6 +26,18 @@ function stepAnswerRange(step: { substeps?: ProgressSubstep[] }): {
 
 /** Etapa 3 é a cronometrada: pontua por tempo, não por item. */
 const TIMER_STEP = 3;
+
+/**
+ * Situação da seção, sem "finalizada": a seção não trava mais, então o que
+ * interessa é quanto da prova foi respondido e se ela parou pela regra dos
+ * cinco erros seguidos.
+ */
+function sectionSituation(sub: ProgressSubstep): string {
+  if (sub.finalizedReason === 'ERROR_LIMIT') return 'Parou em 5 erros seguidos';
+  if (sub.answeredItems === 0) return 'Não iniciada';
+  if (sub.answeredItems >= sub.totalItems) return 'Respondida';
+  return 'Em andamento';
+}
 
 const SKILL_LABELS: Record<string, string> = {
   conhecimento_alfabeto: 'Conhecimento do alfabeto',
@@ -167,6 +179,7 @@ export function ApplicationResultPage() {
                 <th scope="col">Habilidade</th>
                 <th scope="col">Pontuação</th>
                 <th scope="col">Itens respondidos</th>
+                <th scope="col">Erros</th>
                 <th scope="col">Tempo</th>
                 <th scope="col">1ª resposta</th>
                 <th scope="col">Última resposta</th>
@@ -185,6 +198,13 @@ export function ApplicationResultPage() {
                     </td>
                     <td>
                       {s.totalItems != null ? `${s.answeredItems} de ${s.totalItems}` : s.answeredItems}
+                    </td>
+                    {/* Erros só da prova: os exemplos de treino não são
+                        gravados e não entram nesta conta. */}
+                    <td>
+                      {s.stepNumber === TIMER_STEP
+                        ? '—'
+                        : (s.substeps ?? []).reduce((total, sub) => total + sub.wrongItems, 0)}
                     </td>
                     <td>{s.timerMs != null ? formatTimerMs(s.timerMs) : '—'}</td>
                     <td>{formatDateTime(stepAnswerRange(s).first)}</td>
@@ -208,15 +228,11 @@ export function ApplicationResultPage() {
                         )}
                       </td>
                       <td>{sub.answeredItems} de {sub.totalItems}</td>
+                      <td>{s.stepNumber === TIMER_STEP ? '—' : sub.wrongItems}</td>
                       <td>{s.stepNumber === TIMER_STEP && s.timerMs != null ? formatTimerMs(s.timerMs) : '—'}</td>
                       <td>{formatDateTime(sub.firstAnswerAt)}</td>
                       <td>{formatDateTime(sub.lastAnswerAt)}</td>
-                      <td>
-                        <StatusBadge status={sub.status ?? 'NOT_STARTED'} />
-                        {sub.status === 'FINALIZED' && sub.finalizedReason === 'ERROR_LIMIT' && (
-                          <span className="muted"> · 5 erros seguidos</span>
-                        )}
-                      </td>
+                      <td>{sectionSituation(sub)}</td>
                     </tr>
                   ))}
                 </Fragment>
@@ -238,18 +254,11 @@ export function ApplicationResultPage() {
                   <div className="progress-substep" key={sub.order}>
                     <h4>{sub.title}</h4>
                     <p className="progress-count">
-                      Situação: {statusLabel(sub.status)}
+                      Situação: {sectionSituation(sub)}
                       {sub.firstAnswerAt ? ` · 1ª resposta em ${formatDateTime(sub.firstAnswerAt)}` : ''}
                       {sub.lastAnswerAt ? ` · última em ${formatDateTime(sub.lastAnswerAt)}` : ''}
                       {!sub.firstAnswerAt ? ' · nenhuma resposta registrada' : ''}
                     </p>
-                    {sub.status === 'FINALIZED' && (
-                      <p className="progress-count">
-                        {sub.finalizedReason === 'ERROR_LIMIT'
-                          ? 'Seção encerrada após cinco erros consecutivos.'
-                          : 'Seção finalizada: todos os itens foram respondidos.'}
-                      </p>
-                    )}
                     <p className="progress-count">
                       Prova: {sub.answeredItems} de {sub.totalItems} respondidas
                       {' · '}

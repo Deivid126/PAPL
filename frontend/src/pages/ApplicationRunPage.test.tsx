@@ -126,6 +126,39 @@ const protocolSteps = [
   },
 ];
 
+const SEG_SUBSTEP: ProtocolStep['substeps'][number] = {
+      id: 'ps-segmentation',
+      stepNumber: 2,
+      order: 2,
+      title: '2.2 Segmentação silábica',
+      instructions: '',
+      trainingExamples: [`Exemplo 1|/"ba/ -/la/|bala|bala.png`],
+      maxScore: 21,
+      timerRequired: false,
+      items: [
+        {
+          id: 'item-vaca',
+          substepId: 'ps-segmentation',
+          itemNumber: 1,
+          prompt: `/"va/ -/ka/`,
+          expectedAnswer: 'vaca',
+          imageKey: 'segmentacao_silabica/vaca.png',
+          isPending: false,
+          responseType: 'SYLLABLE',
+        },
+        {
+          id: 'item-dedo',
+          substepId: 'ps-segmentation',
+          itemNumber: 2,
+          prompt: `/"de/ -/do/`,
+          expectedAnswer: 'dedo',
+          imageKey: 'segmentacao_silabica/dedo.png',
+          isPending: false,
+          responseType: 'SYLLABLE',
+        },
+      ],
+    };
+
 function makeApp(stepNumber = 1): Application {
   return {
     id: 'app1',
@@ -167,76 +200,31 @@ describe('ApplicationRunPage', () => {
     apiMocks.api.mockClear();
   });
 
-  it('oferece revisar sem sair do item quando o servidor recusa a resposta', async () => {
-    // O avaliador está com a criança na frente, responde e o servidor recusa
-    // porque a seção finalizou entre o salvamento anterior e este. Antes isso
-    // era um beco sem saída: "Não foi possível salvar esta resposta".
-    const saved = makeApp(1);
-    let liberada = false;
-    apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
-      if (url === '/applications/app1') return saved;
-      if (url === '/protocol/steps') return protocolSteps;
-      if (url.endsWith('/reopen')) {
-        liberada = true;
-        return {};
-      }
-      // Como o servidor: recusa enquanto a seção está travada, aceita depois.
-      if (url.endsWith('/items/batch')) {
-        if (!liberada) throw new Error('Esta seção já foi finalizada nesta aplicação.');
-        return {};
-      }
-      return {};
-    });
-
-    renderRun();
-    await screen.findByRole('heading', { name: 'Conhecimento do alfabeto' });
-
-    const choiceGroup = screen.getByRole('group', { name: 'Escolha uma letra' });
-    fireEvent.click(within(choiceGroup).getAllByRole('button')[0]);
-    fireEvent.click(screen.getByRole('button', { name: /Próximo exemplo/ }));
-    await screen.findByText(/Exemplo 2/, undefined, { timeout: 8000 });
-    fireEvent.click(within(screen.getByRole('group', { name: 'Escolha uma letra' })).getAllByRole('button')[0]);
-    fireEvent.click(screen.getByRole('button', { name: /Ir para a prova/ }));
-    fireEvent.click(within(screen.getByRole('group', { name: 'Escolha uma letra' })).getAllByRole('button')[0]);
-
-    // Em vez do erro sem saída, a oferta de liberar a seção ali mesmo.
-    expect(await screen.findByText('Revisar esta seção?', undefined, { timeout: 8000 })).toBeInTheDocument();
-    expect(screen.getByText(/mantém você neste item/)).toBeInTheDocument();
-    expect(screen.queryByText(/Não foi possível salvar esta resposta/)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Revisar respostas' }));
-
-    await waitFor(() =>
-      expect(apiMocks.api).toHaveBeenCalledWith(
-        '/applications/app1/steps/1/sections/1/reopen',
-        { method: 'POST' },
-      ),
-    );
-
-    // A resposta recusada sobe sozinha depois da liberação, sem o avaliador
-    // ter de responder de novo. Esperar aqui também drena o teste.
-    await waitFor(
-      () =>
-        expect(
-          apiMocks.api.mock.calls.filter(([url]) => String(url).endsWith('/items/batch')).length,
-        ).toBeGreaterThan(1),
-      { timeout: 8000 },
-    );
-    expect(screen.queryByText(/Não foi possível salvar esta resposta/)).not.toBeInTheDocument();
-  });
-
-  it('oferece revisar uma seção finalizada e confirma antes de reabrir', async () => {
+  it('não trava uma seção já encerrada: o seletor leva direto a ela, sem confirmação', async () => {
     const saved = makeApp(1);
     saved.steps![0].sections = [{
       id: 'section-vowels',
       applicationStepId: 'as1',
       substepOrder: 1,
       status: 'FINALIZED',
-      finalizedReason: 'ERROR_LIMIT',
-      consecutiveErrors: 5,
+      finalizedReason: 'ALL_ITEMS_ANSWERED',
+      consecutiveErrors: 0,
       startedAt: '2026-10-01T00:00:00.000Z',
       finalizedAt: '2026-10-01T00:01:00.000Z',
     }];
+    saved.steps![0].items = [1, 2].map((itemNumber) => ({
+      id: `saved-${itemNumber}`,
+      applicationStepId: 'as1',
+      itemNumber,
+      prompt: null,
+      expectedAnswer: null,
+      childAnswer: 'A',
+      isCorrect: itemNumber === 1,
+      score: itemNumber === 1 ? 1 : 0,
+      responseTimeMs: null,
+      notes: null,
+      updatedAt: `2026-10-01T00:0${itemNumber}:00.000Z`,
+    }));
     apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
       if (url === '/applications/app1') return saved;
       if (url === '/protocol/steps') return protocolSteps;
@@ -246,39 +234,29 @@ describe('ApplicationRunPage', () => {
     renderRun();
 
     const jumpSelect = await screen.findByLabelText('Ir para');
-    const finalizedOption = within(jumpSelect).getByRole('option', {
-      name: /1\.1 Vogais · Encerrada após 5 erros — revisar/,
-    });
-    // A seção finalizada deixa de ser um beco sem saída: dá para voltar a ela.
-    expect(finalizedOption).not.toBeDisabled();
+    // Nada de "Finalizada" no seletor.
+    expect(within(jumpSelect).getByRole('option', { name: '1.1 Vogais' })).toBeInTheDocument();
 
     fireEvent.change(jumpSelect, { target: { value: '0' } });
 
-    // Reabrir pede confirmação, e a parada por erro vem com o aviso do protocolo.
-    expect(await screen.findByText('Revisar esta seção?')).toBeInTheDocument();
-    expect(screen.getByText(/regra de parada do protocolo/)).toBeInTheDocument();
+    // Abre na prova, no primeiro item, e aceita uma nova resposta.
+    expect(await screen.findByText(/Prova · Grupo 1 de 1 · Item 1 de 2/)).toBeInTheDocument();
+    expect(screen.queryByText('Revisar esta seção?')).not.toBeInTheDocument();
+    fireEvent.click(within(screen.getByRole('group', { name: 'Escolha uma letra' })).getAllByRole('button')[0]);
+
+    await waitFor(
+      () =>
+        expect(apiMocks.api).toHaveBeenCalledWith(
+          '/applications/app1/steps/1/items/batch',
+          expect.objectContaining({ method: 'POST' }),
+        ),
+      { timeout: 8000 },
+    );
     expect(apiMocks.api).not.toHaveBeenCalledWith(
-      expect.stringContaining('/sections/1/reopen'),
+      expect.stringContaining('/reopen'),
       expect.anything(),
     );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Revisar respostas' }));
-
-    await waitFor(() =>
-      expect(apiMocks.api).toHaveBeenCalledWith(
-        '/applications/app1/steps/1/sections/1/reopen',
-        { method: 'POST' },
-      ),
-    );
-
-    // Reabrir encadeia o salto para a seção, que marca a etapa como em
-    // andamento. Esperar aqui evita que essa chamada caia no teste seguinte.
-    await waitFor(() =>
-      expect(apiMocks.api).toHaveBeenCalledWith(
-        '/applications/app1/steps/1',
-        expect.objectContaining({ method: 'PATCH' }),
-      ),
-    );
+    expect(screen.queryByText('Revisar esta seção?')).not.toBeInTheDocument();
   });
 
   it('não oferece cabelo como distrator quando o alvo é a cor amarela', async () => {
@@ -329,29 +307,48 @@ describe('ApplicationRunPage', () => {
     }
   });
 
-  it('mostra os círculos também nos exemplos de treino', async () => {
+  it('abre a seção pelo exemplo mesmo quando a seção anterior já tem respostas', async () => {
+    // O número do item no protocolo recomeça em 1 a cada subetapa. O seletor
+    // confundia o item 1 da 2.2 com o item 1 da 2.1, já respondido, e abria a
+    // 2.2 na prova, na segunda pergunta, em vez de abrir no exemplo.
+    const saved = makeApp(2);
+    saved.steps![1].items = [{
+      id: 'saved-sintese',
+      applicationStepId: 'as2',
+      itemNumber: 1,
+      prompt: '/ka/ /fE/',
+      expectedAnswer: 'café',
+      childAnswer: 'café',
+      isCorrect: true,
+      score: 1,
+      responseTimeMs: null,
+      notes: null,
+      updatedAt: '2026-10-01T00:01:00.000Z',
+    }];
+    const segmentationProtocol = structuredClone(protocolSteps) as ProtocolStep[];
+    segmentationProtocol[1].substeps.push(SEG_SUBSTEP);
+    apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
+      if (url === '/applications/app1') return saved;
+      if (url === '/protocol/steps') return segmentationProtocol;
+      return {};
+    });
+
+    renderRun();
+
+    const jumpSelect = await screen.findByLabelText('Ir para');
+    const target = within(jumpSelect)
+      .getAllByRole('option')
+      .find((option) => option.textContent?.includes('2.2 Segmentação silábica'));
+    fireEvent.change(jumpSelect, { target: { value: (target as HTMLOptionElement).value } });
+
+    expect(await screen.findByText(/Treino · Segmentação silábica · Exemplo 1/)).toBeInTheDocument();
+    expect(screen.queryByText(/Item 2 de 2/)).not.toBeInTheDocument();
+  });
+
+  it('não mostra círculos nem pergunta o acerto nos exemplos da segmentação', async () => {
     const saved = makeApp(2);
     const segmentationProtocol = structuredClone(protocolSteps) as ProtocolStep[];
-    segmentationProtocol[1].substeps = [{
-      id: 'ps-segmentation',
-      stepNumber: 2,
-      order: 2,
-      title: '2.2 Segmentação silábica',
-      instructions: '',
-      trainingExamples: [`Exemplo 1|/"ba/ -/la/|bala|bala.png`],
-      maxScore: 21,
-      timerRequired: false,
-      items: [{
-        id: 'item-vaca',
-        substepId: 'ps-segmentation',
-        itemNumber: 1,
-        prompt: `/"va/ -/ka/`,
-        expectedAnswer: 'vaca',
-        imageKey: 'segmentacao_silabica/vaca.png',
-        isPending: false,
-        responseType: 'SYLLABLE',
-      }],
-    }];
+    segmentationProtocol[1].substeps = [SEG_SUBSTEP];
     apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
       if (url === '/applications/app1') return saved;
       if (url === '/protocol/steps') return segmentationProtocol;
@@ -368,44 +365,31 @@ describe('ApplicationRunPage', () => {
       .find((option) => option.textContent?.includes('2.2 Segmentação silábica'));
     fireEvent.change(jumpSelect, { target: { value: (target as HTMLOptionElement).value } });
 
-    // A subetapa abre no treino, e o treino segue o mesmo caminho da prova:
-    // três círculos para a criança bater.
-    const circleGroup = await screen.findByRole('group', { name: 'Separação em sílabas' });
-    expect(within(circleGroup).getAllByRole('button')).toHaveLength(3);
+    await screen.findByText(/Treino · Segmentação silábica · Exemplo 1/);
+    expect(screen.queryByRole('group', { name: 'Separação em sílabas' })).not.toBeInTheDocument();
 
-    // Avançar o exemplo também passa pela pergunta de acerto.
+    // Exemplo não é pontuado: avança direto, sem a pergunta de acerto.
     fireEvent.click(screen.getByRole('button', { name: /Ir para a prova/ }));
-    expect(await screen.findByText('A criança acertou?')).toBeInTheDocument();
-
-    // O salto encadeia a troca de etapa. Esperar aqui evita que essa chamada
-    // caia na contagem do teste seguinte.
-    await waitFor(() =>
-      expect(
-        apiMocks.api.mock.calls.some(([, init]) => (init as RequestInit)?.method === 'PATCH'),
-      ).toBe(true),
-    );
+    expect(await screen.findByText(/Prova · Segmentação silábica · Item 1 de 2/)).toBeInTheDocument();
+    expect(screen.queryByText('A criança acertou?')).not.toBeInTheDocument();
+    expect(
+      apiMocks.api.mock.calls.some(
+        ([url, init]) =>
+          String(url).endsWith('/items/batch') &&
+          String((init as RequestInit)?.body).includes('isCorrect'),
+      ),
+    ).toBe(false);
   });
 
-  it('mostra sempre três círculos, permite desmarcar e pergunta o acerto ao aplicador', async () => {
+  it('na prova da segmentação pergunta acertou ou errou ao continuar', async () => {
     const saved = makeApp(2);
-    const segmentationPrompt = `/"va/ -/ka/`;
-    saved.steps![1].sections = [{
-      id: 'section-segmentation',
-      applicationStepId: 'as2',
-      substepOrder: 2,
-      status: 'IN_PROGRESS',
-      finalizedReason: null,
-      consecutiveErrors: 0,
-      startedAt: '2026-10-01T00:00:00.000Z',
-      finalizedAt: null,
-    }];
     saved.steps![1].items = [{
       id: 'saved-vaca',
       applicationStepId: 'as2',
       itemNumber: 1,
-      prompt: segmentationPrompt,
+      prompt: `/"va/ -/ka/`,
       expectedAnswer: 'vaca',
-      childAnswer: '0',
+      childAnswer: '',
       isCorrect: false,
       score: 0,
       responseTimeMs: null,
@@ -413,26 +397,7 @@ describe('ApplicationRunPage', () => {
       updatedAt: '2026-10-01T00:01:00.000Z',
     }];
     const segmentationProtocol = structuredClone(protocolSteps) as ProtocolStep[];
-    segmentationProtocol[1].substeps = [{
-      id: 'ps-segmentation',
-      stepNumber: 2,
-      order: 2,
-      title: '2.2 Segmentação silábica',
-      instructions: '',
-      trainingExamples: [],
-      maxScore: 21,
-      timerRequired: false,
-      items: [{
-        id: 'item-vaca',
-        substepId: 'ps-segmentation',
-        itemNumber: 1,
-        prompt: segmentationPrompt,
-        expectedAnswer: 'vaca',
-        imageKey: 'segmentacao_silabica/vaca.png',
-        isPending: false,
-        responseType: 'SYLLABLE',
-      }],
-    }];
+    segmentationProtocol[1].substeps = [{ ...SEG_SUBSTEP, items: [SEG_SUBSTEP.items[0]] }];
     apiMocks.api.mockImplementation(async (url: string, _init?: RequestInit) => {
       if (url === '/applications/app1') return saved;
       if (url === '/protocol/steps') return segmentationProtocol;
@@ -441,28 +406,10 @@ describe('ApplicationRunPage', () => {
 
     renderRun();
 
-    const circleGroup = await screen.findByRole('group', { name: 'Separação em sílabas' });
-    const circles = within(circleGroup).getAllByRole('button');
-    expect(circles).toHaveLength(3);
-    expect(screen.getByText('vaca')).toBeInTheDocument();
-    expect(screen.queryByText(segmentationPrompt)).not.toBeInTheDocument();
+    await screen.findByText(/Prova · Segmentação silábica · Item 1 de 1/);
+    expect(screen.queryByRole('group', { name: 'Separação em sílabas' })).not.toBeInTheDocument();
 
-    const pressedCount = () =>
-      within(circleGroup)
-        .getAllByRole('button')
-        .filter((circle) => circle.getAttribute('aria-pressed') === 'true').length;
-
-    fireEvent.click(circles[0]);
-    fireEvent.click(circles[1]);
-    expect(pressedCount()).toBe(2);
-
-    // Bater de novo no mesmo círculo desmarca.
-    fireEvent.click(circles[1]);
-    expect(pressedCount()).toBe(1);
-    fireEvent.click(circles[1]);
-    expect(pressedCount()).toBe(2);
-
-    // Quem decide o acerto é o aplicador, não a quantidade de círculos.
+    // Quem decide o acerto é o aplicador, na pergunta que abre ao continuar.
     fireEvent.click(screen.getByRole('button', { name: /Concluir etapa/ }));
     fireEvent.click(await screen.findByRole('button', { name: 'Acertou' }));
     fireEvent.click(await screen.findByRole('button', { name: /Confirmar e prosseguir/ }));
@@ -471,8 +418,6 @@ describe('ApplicationRunPage', () => {
       '/applications/app1/steps/2/items/batch',
       expect.objectContaining({ method: 'POST' }),
     ));
-    // A última: a gravação que interessa é a do julgamento, e antes dela pode
-    // haver flush de outras telas por que a aplicação passou.
     const batchCalls = apiMocks.api.mock.calls.filter(
       ([url]) => url === '/applications/app1/steps/2/items/batch',
     );
@@ -480,7 +425,7 @@ describe('ApplicationRunPage', () => {
     const payload = JSON.parse(String(batchCall?.[1]?.body)) as { items: Array<Record<string, unknown>> };
     expect(payload.items[0]).toMatchObject({
       itemNumber: 1,
-      childAnswer: '2',
+      childAnswer: 'vaca',
       expectedAnswer: 'vaca',
       isCorrect: true,
     });

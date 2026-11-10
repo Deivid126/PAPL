@@ -14,7 +14,6 @@ import { Alert, Modal, ProgressBar, Spinner, statusLabel } from '../components/u
 import { IconArrowLeft, IconArrowRight, IconClock, IconSave } from '../components/Icons';
 import { formatDate } from '../lib/format';
 import { resumeCursor } from '../lib/resume';
-import { circleCountForPrompt } from '../lib/syllableCircles';
 import { deriveSectionState } from '../lib/sectionProgress';
 
 /** Destino do seletor "Ir para": uma subetapa do protocolo, ou a revisão. */
@@ -148,17 +147,11 @@ export function ApplicationRunPage() {
   const [stepStatus, setStepStatus] = useState<string>('NOT_STARTED');
   const [confirmStepOpen, setConfirmStepOpen] = useState(false);
   const [modalError, setModalError] = useState<string | null>(null);
-  // Seções reabertas para revisão pelo seletor "Ir para". Enquanto a seção
-  // está aqui ela deixa de contar como finalizada: dá para andar pelos itens,
-  // corrigir uma resposta já dada e responder o que ficou em branco. As
-  // respostas continuam como estavam — reabrir não apaga nada.
-  const [reopened, setReopened] = useState<Record<string, true>>({});
-  // `stay` distingue as duas portas de entrada: pelo seletor a revisão volta
-  // ao primeiro item da seção; vinda de uma resposta recusada, destrava sem
-  // tirar o avaliador de onde ele está, com a criança na frente.
-  const [confirmReopen, setConfirmReopen] = useState<
-    { target: JumpTarget; stay: boolean } | null
-  >(null);
+  // Respostas de cada etapa como estavam na última gravação desta sessão.
+  // `states` é indexado só pelo número do item, que se repete entre etapas, e
+  // `app` guarda o que veio do servidor ao abrir a tela: sem esta cópia, voltar
+  // a uma etapa já respondida mostraria as respostas de quando a tela abriu.
+  const stepCacheRef = useRef<Record<number, Record<string, UnitState>>>({});
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedSignaturesRef = useRef<Record<string, string>>({});
   const flushChainRef = useRef<Promise<void>>(Promise.resolve());
@@ -179,15 +172,6 @@ export function ApplicationRunPage() {
         ),
       );
       setSectionStates(Object.fromEntries(loadedSections));
-      // Revisão aberta antes de um reload continua aberta: a marca vem do
-      // servidor, não do estado local.
-      setReopened(
-        Object.fromEntries(
-          loadedSections
-            .filter(([, section]) => section.reopenedAt != null)
-            .map(([key]) => [key, true as const]),
-        ),
-      );
       const cursor = resumeCursor(appRes, protocolRes);
       if (cursor) {
         resumeStepRef.current = cursor.stepNumber;
@@ -237,6 +221,11 @@ export function ApplicationRunPage() {
       return;
     }
     resumeStepRef.current = null;
+    resetPositions();
+  }, [currentStep]);
+
+  /** Toda subetapa volta ao primeiro exemplo do treino. */
+  function resetPositions() {
     setAlphabetPhase('TRAINING');
     setAlphabetGroup(1);
     setAlphabetIndex(0);
@@ -251,7 +240,7 @@ export function ApplicationRunPage() {
     setComprehensionPhase('TRAINING');
     setComprehensionIndex(0);
     setStep2Substep(1);
-  }, [currentStep]);
+  }
 
   const units = useMemo(
     () => (protocol.length > 0 ? buildUnits(currentStep, protocol) : []),
@@ -317,9 +306,10 @@ export function ApplicationRunPage() {
   useEffect(() => {
     if (!app || !currentStepData) return;
     const next: Record<string, UnitState> = {};
+    const cached = stepCacheRef.current[currentStep];
     for (const unit of units) {
       const existing = currentStepData.items.find((i) => i.itemNumber === unit.itemNumber);
-      next[String(unit.itemNumber)] = itemToState(existing);
+      next[String(unit.itemNumber)] = cached?.[String(unit.itemNumber)] ?? itemToState(existing);
     }
     setStates((prev) => {
       const merged = { ...prev };
@@ -332,26 +322,6 @@ export function ApplicationRunPage() {
   }, [app, currentStepData, units, currentStep]);
 
   function setUnit(itemNumber: number, patch: Partial<UnitState>) {
-    const targetUnit = units.find((unit) => unit.itemNumber === itemNumber);
-    const section = targetUnit
-      ? sectionStates[`${currentStep}:${targetUnit.substep.order}`]
-      : undefined;
-    const sectionKey = targetUnit ? `${currentStep}:${targetUnit.substep.order}` : '';
-    if (section?.status === 'FINALIZED' && !reopened[sectionKey]) {
-      // Em vez de um beco sem saída, oferece a revisão da própria seção que
-      // bloqueou: o avaliador está com a criança na frente e quer refazer.
-      const target = jumpTargets.find(
-        (candidate) =>
-          candidate.stepNumber === currentStep &&
-          candidate.substepOrder === targetUnit?.substep.order,
-      );
-      if (target) setConfirmReopen({ target, stay: true });
-      else
-        setModalError(
-          'Esta seção já foi finalizada nesta aplicação. Para corrigir, volte a ela pelo seletor "Ir para".',
-        );
-      return;
-    }
     const key = String(itemNumber);
     const current = statesRef.current;
     const cur = current[key] ?? itemToState(undefined);
@@ -362,18 +332,19 @@ export function ApplicationRunPage() {
     queueSave();
   }
 
-  function sectionIsFinalized(sectionUnits: Unit[]): boolean {
-    const order = sectionUnits[0]?.substep.order;
-    if (order == null) return false;
-    // Em revisão a seção se comporta como não finalizada: "Avançar" anda item
-    // a item em vez de pular para a próxima subetapa.
-    if (reopened[`${currentStep}:${order}`]) return false;
-    const saved = sectionStates[`${currentStep}:${order}`];
-    if (saved?.status === 'FINALIZED') return true;
-    const answers = sectionUnits.map((unit) =>
-      statesRef.current[String(unit.itemNumber)] ?? EMPTY_STATE,
-    );
-    return deriveSectionState(answers).status === 'FINALIZED';
+  /**
+   * Regra de parada do protocolo: cinco erros seguidos encerram a seção.
+   *
+   * Olha só as respostas da prova até o item em que o avaliador está — os
+   * exemplos de treino nem são gravados. Assim dá para voltar a um item
+   * anterior e andar por ele normalmente; "Prosseguir" só salta para a
+   * próxima seção no item em que a sequência de cinco erros se completa.
+   */
+  function stoppedByErrors(sectionUnits: Unit[], index: number): boolean {
+    const answers = sectionUnits
+      .slice(0, index + 1)
+      .map((unit) => statesRef.current[String(unit.itemNumber)] ?? EMPTY_STATE);
+    return deriveSectionState(answers).finalizedReason === 'ERROR_LIMIT';
   }
 
   // Sair da tela cancela o salvamento agendado: sem isso o timer vence com a
@@ -420,6 +391,12 @@ export function ApplicationRunPage() {
     if (!app) return;
     const stepNumber = currentStep;
     const latest = statesRef.current;
+    stepCacheRef.current[stepNumber] = Object.fromEntries(
+      units.flatMap((unit) => {
+        const st = latest[String(unit.itemNumber)];
+        return st ? [[String(unit.itemNumber), st] as const] : [];
+      }),
+    );
 
     // Monta tudo que mudou e envia numa requisição só. Antes cada item ia
     // num POST separado, com um await por item: ~255ms de rede vezes o
@@ -503,27 +480,7 @@ export function ApplicationRunPage() {
       setSavedAt(new Date().toLocaleTimeString('pt-BR'));
     } catch (err) {
       setSaving(false);
-      const message = errorMessage(err);
-      // O servidor pode recusar por seção finalizada mesmo com a trava local
-      // satisfeita: entre o salvamento que finalizou a seção e esta resposta
-      // há uma corrida. Em vez do beco sem saída, oferece a revisão — a
-      // resposta recusada continua pendente e sobe no próximo flush.
-      const blockedUnit =
-        /seção já foi finalizada/i.test(message) && stepNumber === currentStep
-          ? units.find((unit) => unit.itemNumber === pending[0]?.body.itemNumber)
-          : undefined;
-      const target = blockedUnit
-        ? jumpTargets.find(
-            (candidate) =>
-              candidate.stepNumber === stepNumber &&
-              candidate.substepOrder === blockedUnit.substep.order,
-          )
-        : undefined;
-      if (target) {
-        setConfirmReopen({ target, stay: true });
-        return;
-      }
-      setModalError(`Não foi possível salvar esta resposta. ${message}`);
+      setModalError(`Não foi possível salvar esta resposta. ${errorMessage(err)}`);
     }
   }
 
@@ -659,63 +616,29 @@ export function ApplicationRunPage() {
 
   const isReview = currentStep > 4;
 
-  // Salta para uma subetapa: entra na prova no primeiro item sem resposta
-  // quando a subetapa já tem respostas salvas; senão, começa no treino.
-  /**
-   * Destrava a seção para revisão sem sair do item atual, e reenvia o que
-   * ficou pendente — a resposta recusada pelo servidor continua na fila.
-   */
-  async function unlockSection(target: JumpTarget) {
-    if (target.substepOrder == null) return;
-    const sectionKey = `${target.stepNumber}:${target.substepOrder}`;
-    try {
-      await api(
-        `/applications/${id}/steps/${target.stepNumber}/sections/${target.substepOrder}/reopen`,
-        { method: 'POST' },
+  /** Diz se o item (numeração da etapa inteira) já tem resposta. */
+  function isAnswered(stepNumber: number, itemNumber: number): boolean {
+    const key = String(itemNumber);
+    const st =
+      (stepNumber === currentStep ? statesRef.current[key] : undefined) ??
+      stepCacheRef.current[stepNumber]?.[key] ??
+      itemToState(
+        app?.steps
+          ?.find((step) => step.stepNumber === stepNumber)
+          ?.items.find((item) => item.itemNumber === itemNumber),
       );
-      setReopened((prev) => ({ ...prev, [sectionKey]: true }));
-      await flushAll();
-    } catch (err) {
-      setModalError(errorMessage(err));
-    }
+    return st.isCorrect !== null || st.childAnswer !== '' || st.responseTimeMs != null;
   }
 
-  async function jumpTo(target: JumpTarget, options?: { review?: boolean }) {
-    const sectionKey = target.substepOrder == null
-      ? null
-      : `${target.stepNumber}:${target.substepOrder}`;
-    const section = sectionKey == null ? undefined : sectionStates[sectionKey];
-    const finalized =
-      section?.status === 'FINALIZED' || target.section?.status === 'FINALIZED';
-    // Seção finalizada: confirma antes de reabrir, para o avaliador não cair
-    // na revisão sem querer ao escolher no seletor.
-    const review = options?.review ?? false;
-    if (finalized && !review && sectionKey != null && !reopened[sectionKey]) {
-      setConfirmReopen({ target, stay: false });
-      return;
-    }
-    try {
-      // O servidor também recusa gravação em seção finalizada, então a
-      // revisão precisa ser destravada lá antes de qualquer edição.
-      if (review && sectionKey != null && target.substepOrder != null) {
-        await api(
-          `/applications/${id}/steps/${target.stepNumber}/sections/${target.substepOrder}/reopen`,
-          { method: 'POST' },
-        );
-        setReopened((prev) => ({ ...prev, [sectionKey]: true }));
-      }
-    } catch (err) {
-      setModalError(errorMessage(err));
-      return;
-    }
+  // Salta para uma subetapa: começa pelos exemplos quando ela ainda não tem
+  // resposta; senão entra na prova, no primeiro item sem resposta.
+  async function jumpTo(target: JumpTarget) {
     try {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
       await flushAll();
       const stepNumber = target.stepNumber;
-      if (stepNumber !== currentStep) {
-        await saveApplicationStep(stepNumber);
-        setCurrentStep(stepNumber);
-      }
+      const changingStep = stepNumber !== currentStep;
+      if (changingStep) await saveApplicationStep(stepNumber);
       if (currentStepData && currentStepData.status !== 'COMPLETED') {
         await api(`/applications/${id}/steps/${currentStep}`, {
           method: 'PATCH',
@@ -723,42 +646,58 @@ export function ApplicationRunPage() {
         });
         setStepStatus('IN_PROGRESS');
       }
-      if (stepNumber === 5) return;
-      const nextStep = protocol.find((s) => s.stepNumber === stepNumber);
-      const sub = target.substepOrder == null ? null : nextStep?.substeps.find((s) => s.order === target.substepOrder);
+      // Daqui para baixo não há mais await: a troca de etapa e a posição
+      // dentro dela entram na mesma renderização. A marca em resumeStepRef
+      // impede o efeito de troca de etapa de devolver tudo ao início depois
+      // que a posição certa já foi escolhida.
+      if (changingStep) {
+        resumeStepRef.current = stepNumber;
+        resetPositions();
+        setCurrentStep(stepNumber);
+      }
+      if (stepNumber === 5 || target.substepOrder == null) return;
+      const substeps = protocol.find((s) => s.stepNumber === stepNumber)?.substeps ?? [];
+      const subIndex = substeps.findIndex((s) => s.order === target.substepOrder);
+      const sub = substeps[subIndex];
       if (!sub) return;
-      const answered = sub.items.some((item) => {
-        const st = statesRef.current[String(item.itemNumber)];
-        return st && (st.isCorrect !== null || st.childAnswer !== '' || st.responseTimeMs != null);
-      });
-      const firstUnanswered = sub.items.findIndex((item) => {
-        const st = statesRef.current[String(item.itemNumber)];
-        return !(st && (st.isCorrect !== null || st.childAnswer !== '' || st.responseTimeMs != null));
-      });
-      // Em revisão volta ao primeiro item da seção, com as respostas como
-      // estão; fora dela, retoma no primeiro item ainda sem resposta.
-      const reviewing = review || (sectionKey != null && reopened[sectionKey] === true);
-      const localIndex = reviewing ? 0 : firstUnanswered >= 0 ? firstUnanswered : 0;
-      const startInTest = reviewing || answered;
+      // O número do item na aplicação conta a etapa inteira; o do protocolo
+      // recomeça em 1 a cada subetapa. Usar o do protocolo fazia a subetapa
+      // 2.2 enxergar as respostas da 2.1 e abrir na prova, numa pergunta
+      // adiante, em vez de abrir no exemplo.
+      const offset = substeps
+        .slice(0, subIndex)
+        .reduce((total, previous) => total + previous.items.length, 0);
+      const answered = sub.items.map((_, index) => isAnswered(stepNumber, offset + index + 1));
+      const startInTest = answered.some(Boolean);
+      const firstUnanswered = answered.indexOf(false);
+      // Seção já encerrada (toda respondida ou parada por erros) abre no
+      // primeiro item, para conferência.
+      const closed =
+        sectionStates[`${stepNumber}:${target.substepOrder}`]?.status === 'FINALIZED';
+      const localIndex = !startInTest || closed || firstUnanswered < 0 ? 0 : firstUnanswered;
+      const phase = startInTest ? 'TEST' : 'TRAINING';
       if (stepNumber === 1) {
-        setAlphabetGroup(target.substepOrder ?? 1);
-        setAlphabetPhase(startInTest ? 'TEST' : 'TRAINING');
+        setAlphabetGroup(target.substepOrder);
+        setAlphabetPhase(phase);
         setAlphabetIndex(localIndex);
       } else if (stepNumber === 2) {
-        setStep2Substep((target.substepOrder ?? 1) as 1 | 2 | 3 | 4);
+        setStep2Substep(target.substepOrder as 1 | 2 | 3 | 4);
         if (target.substepOrder === 1) {
-          setSynthesisPhase(startInTest ? 'TEST' : 'TRAINING');
+          setSynthesisPhase(phase);
           setSynthesisIndex(localIndex);
         } else if (target.substepOrder === 2) {
-          setSegmentationPhase(startInTest ? 'TEST' : 'TRAINING');
+          setSegmentationPhase(phase);
           setSegmentationIndex(localIndex);
         } else if (target.substepOrder === 3) {
-          setPhonemePhase(startInTest ? 'TEST' : 'TRAINING');
+          setPhonemePhase(phase);
           setPhonemeIndex(localIndex);
         } else {
-          setProductionPhase(startInTest ? 'TEST' : 'TRAINING');
+          setProductionPhase(phase);
           setProductionIndex(localIndex);
         }
+      } else if (stepNumber === 4) {
+        setComprehensionPhase(phase);
+        setComprehensionIndex(offset + localIndex);
       }
     } catch (err) {
       setModalError(errorMessage(err));
@@ -803,11 +742,11 @@ export function ApplicationRunPage() {
               {jumpTargets.map((target, i) => (
                 <option key={`${target.stepNumber}-${target.substepOrder}`} value={i}>
                   {target.label}
-                  {target.section?.status === 'FINALIZED'
-                    ? target.section.finalizedReason === 'ERROR_LIMIT'
-                      ? ' · Encerrada após 5 erros — revisar'
-                      : ' · Finalizada — revisar'
-                    : target.section?.status === 'IN_PROGRESS' ? ' · Em andamento' : ''}
+                  {target.section?.status === 'IN_PROGRESS'
+                    ? ' · Em andamento'
+                    : target.section?.finalizedReason === 'ERROR_LIMIT'
+                      ? ' · Parou em 5 erros seguidos'
+                      : ''}
                 </option>
               ))}
             </select>
@@ -880,7 +819,7 @@ export function ApplicationRunPage() {
                 setAlphabetIndex(0);
                 return;
               }
-              if (sectionIsFinalized(groupUnits)) {
+              if (stoppedByErrors(groupUnits, alphabetIndex)) {
                 await flushAll();
                 if (alphabetGroup < alphabetGroups.length) {
                   setAlphabetGroup((group) => group + 1);
@@ -934,7 +873,7 @@ export function ApplicationRunPage() {
                 setSynthesisIndex(0);
                 return;
               }
-              if (sectionIsFinalized(synthesisUnits)) {
+              if (stoppedByErrors(synthesisUnits, synthesisIndex)) {
                 await flushAll();
                 if (segmentationUnits.length > 0) setStep2Substep(2);
                 else requestNext();
@@ -988,7 +927,7 @@ export function ApplicationRunPage() {
                 setSegmentationIndex(0);
                 return;
               }
-              if (sectionIsFinalized(segmentationUnits)) {
+              if (stoppedByErrors(segmentationUnits, segmentationIndex)) {
                 await flushAll();
                 if (phonemeUnits.length > 0) setStep2Substep(3);
                 else if (productionUnits.length > 0) setStep2Substep(4);
@@ -1049,7 +988,7 @@ export function ApplicationRunPage() {
                 setPhonemeIndex(0);
                 return;
               }
-              if (sectionIsFinalized(phonemeUnits)) {
+              if (stoppedByErrors(phonemeUnits, phonemeIndex)) {
                 await flushAll();
                 if (productionUnits.length > 0) setStep2Substep(4);
                 else requestNext();
@@ -1104,7 +1043,7 @@ export function ApplicationRunPage() {
                 setProductionIndex(0);
                 return;
               }
-              if (sectionIsFinalized(productionUnits)) {
+              if (stoppedByErrors(productionUnits, productionIndex)) {
                 await flushAll();
                 requestNext();
                 return;
@@ -1146,7 +1085,7 @@ export function ApplicationRunPage() {
                 setComprehensionIndex(0);
                 return;
               }
-              if (sectionIsFinalized(units)) {
+              if (stoppedByErrors(units, comprehensionIndex)) {
                 await flushAll();
                 requestNext();
                 return;
@@ -1188,45 +1127,6 @@ export function ApplicationRunPage() {
         }
       >
         <p>As respostas desta etapa serão salvas e a aplicação avançará na ordem do protocolo.</p>
-      </Modal>
-
-      <Modal
-        open={confirmReopen !== null}
-        title="Revisar esta seção?"
-        onClose={() => setConfirmReopen(null)}
-        actions={
-          <>
-            <button className="btn btn-secondary" type="button" onClick={() => setConfirmReopen(null)}>
-              Cancelar
-            </button>
-            <button
-              className="btn btn-primary"
-              type="button"
-              onClick={() => {
-                const pending = confirmReopen;
-                setConfirmReopen(null);
-                if (!pending) return;
-                if (pending.stay) void unlockSection(pending.target);
-                else void jumpTo(pending.target, { review: true });
-              }}
-            >
-              Revisar respostas
-            </button>
-          </>
-        }
-      >
-        <p>
-          {confirmReopen?.target.label} já foi finalizada.{' '}
-          {confirmReopen?.stay
-            ? 'Liberar a revisão mantém você neste item e grava a resposta que acabou de dar.'
-            : 'A revisão volta ao primeiro item com as respostas como estão; você pode corrigir o que já respondeu e preencher o que ficou em branco.'}
-        </p>
-        {confirmReopen?.target.section?.finalizedReason === 'ERROR_LIMIT' ? (
-          <p>
-            Atenção: esta seção foi encerrada pela regra de parada do protocolo, após 5 erros
-            consecutivos. Só altere se houve engano no registro.
-          </p>
-        ) : null}
       </Modal>
 
       <Modal
@@ -1344,10 +1244,6 @@ function SegmentationStepView({
   // é sempre local da visita atual — ao avançar/voltar, o item volta desmarcado.
   const [visitedMark, setVisitedMark] = useState<boolean | null>(null);
   const [visitedFile, setVisitedFile] = useState<string>('');
-  const [selectedSyllableCircles, setSelectedSyllableCircles] = useState<number[]>([]);
-  // Prosseguir na segmentação abre a pergunta de acerto: quem julga é o
-  // aplicador, e não a quantidade de círculos que a criança bateu.
-  const [askingJudgement, setAskingJudgement] = useState(false);
   const isPhoneme = mode === 'phoneme';
   const isProduction = mode === 'production';
   const isComprehension = mode === 'comprehension';
@@ -1367,12 +1263,11 @@ function SegmentationStepView({
   const imageKey = phase === 'TRAINING' && parts[3] ? `${storageDir}/${parts[3]}` : currentUnit?.imageKey ?? '';
   const hasImage = imageKey !== '';
   const mark = phase === 'TRAINING' ? trainingMark : states[String(currentUnit?.itemNumber)]?.isCorrect ?? null;
-  // Os exemplos seguem o mesmo caminho da prova: a criança bate nos círculos
-  // no treino também, para chegar à prova já sabendo o que fazer.
-  const isSyllableChoice = mode === 'segmentation';
-  const syllableCircleCount = isSyllableChoice ? circleCountForPrompt(syllables) : 0;
-  const savedChildAnswer = states[String(currentUnit?.itemNumber)]?.childAnswer ?? '';
-  const savedCircleCount = Number.parseInt(savedChildAnswer, 10);
+  // Segmentação: a criança separa a palavra em voz alta. Na prova, continuar
+  // abre a pergunta "acertou ou errou?" para o aplicador; nos exemplos não há
+  // pergunta, o avanço é direto.
+  const isSegmentation = mode === 'segmentation';
+  const [askingJudgement, setAskingJudgement] = useState(false);
 
   // Produção: prompts de treino trazem "sapo, cinto, sol..." — separa para exibir e usa a 1ª como alvo.
   const productionExamples = isProduction && phase === 'TRAINING' ? (parts[2] ?? '').split(',').map((s) => s.trim()) : [];
@@ -1474,41 +1369,22 @@ function SegmentationStepView({
     .map((w) => ({ word: w, image: EXAMPLE_IMAGES[w] }))
     .filter((e) => e.image);
 
-  // A contagem salva é lida por ref porque a restauração só vale na troca de
-  // item. Como dependência ela refazia a seleção a cada gravação, desmarcando
-  // o que a criança tinha acabado de bater.
-  const savedCircleCountRef = useRef(savedCircleCount);
-  savedCircleCountRef.current = savedCircleCount;
-
   useEffect(() => {
     setTrainingMark(null);
     setVisitedMark(null);
     setVisitedFile('');
-    const saved = savedCircleCountRef.current;
-    const restoredCount = Number.isInteger(saved) && saved > 0
-      ? Math.min(saved, syllableCircleCount)
-      : 0;
-    setSelectedSyllableCircles(
-      isSyllableChoice ? Array.from({ length: restoredCount }, (_, index) => index) : [],
-    );
-  }, [phase, itemIndex, isSyllableChoice, syllableCircleCount]);
-
+  }, [phase, itemIndex]);
 
   if (!currentUnit && phase === 'TEST') return null;
-  // Na segmentação o acerto é perguntado ao prosseguir, então não há o que
-  // travar antes: a criança pode não bater em círculo nenhum.
-  const canContinue = isSyllableChoice ? true : mark !== null;
+  // Na segmentação o acerto é perguntado ao continuar, então nada trava antes.
+  const canContinue = isSegmentation ? true : mark !== null;
 
   /** Grava o que o aplicador respondeu na pergunta de acerto e avança. */
   function registerJudgement(isCorrect: boolean) {
     setAskingJudgement(false);
-    if (phase === 'TRAINING') {
-      setTrainingMark(isCorrect);
-    } else if (currentUnit) {
+    if (currentUnit) {
       setUnit(currentUnit.itemNumber, {
-        // A contagem de círculos vira registro do que a criança fez; ela não
-        // decide mais o acerto.
-        childAnswer: String(selectedSyllableCircles.length),
+        childAnswer: isCorrect ? word : '',
         isCorrect,
         prompt: syllables,
         expectedAnswer: word,
@@ -1556,11 +1432,9 @@ function SegmentationStepView({
                 ? phase === 'TRAINING'
                   ? 'Mostre a figura e peça à criança que toque na letra com que a palavra começa. Faça os exemplos juntos antes da prova.'
                   : 'Peça à criança que toque na letra com que a palavra da figura começa.'
-                : isSyllableChoice
-                  ? 'Toque em um círculo para cada sílaba da palavra.'
-                  : phase === 'TRAINING'
-                    ? 'Peça à criança para separar a palavra em sílabas e marque o resultado.'
-                    : 'Mostre a imagem e o nome. A criança fala a palavra separada em sílabas e o avaliador marca acerto ou erro.'}
+                : phase === 'TRAINING'
+                  ? 'Mostre a figura e peça à criança para separar a palavra em sílabas. Faça os exemplos juntos antes da prova.'
+                  : 'Mostre a figura. A criança fala a palavra separada em sílabas; ao continuar, informe se acertou ou errou.'}
         </p>
         {isProduction ? (
           <div className="production-reference">
@@ -1590,22 +1464,22 @@ function SegmentationStepView({
           </div>
         ) : isComprehension || isPhoneme ? null : (
           <div
-            className={`segmentation-reference${isSyllableChoice ? ' segmentation-reference-child-choice' : ''}`}
-            aria-label={isSyllableChoice ? 'Imagem e referência do avaliador' : 'Material apresentado'}
+            className={`segmentation-reference${isSegmentation ? ' segmentation-reference-child-choice' : ''}`}
+            aria-label={isSegmentation ? 'Imagem e referência do avaliador' : 'Material apresentado'}
           >
             {hasImage && (
               <img
                 src={storageUrl(imageKey)}
-                alt={isSyllableChoice ? '' : `Figura da palavra ${word}`}
+                alt={isSegmentation ? '' : `Figura da palavra ${word}`}
                 className="segmentation-image"
               />
             )}
-            <div className={`segmentation-word${isSyllableChoice ? ' segmentation-evaluator-word' : ''}`}>
+            <div className={`segmentation-word${isSegmentation ? ' segmentation-evaluator-word' : ''}`}>
               <span className="segmentation-word-label">
-                {isSyllableChoice ? 'Referência do avaliador' : isPhoneme ? 'Respostas aceitas' : 'Palavra'}
+                {isSegmentation ? 'Referência do avaliador' : isPhoneme ? 'Respostas aceitas' : 'Palavra'}
               </span>
               <strong>{word}</strong>
-              {!isSyllableChoice && <span className="segmentation-syllables">{syllables}</span>}
+              {!isSegmentation && <span className="segmentation-syllables">{syllables}</span>}
             </div>
           </div>
         )}
@@ -1748,58 +1622,11 @@ function SegmentationStepView({
         </div>
       )}
 
-      {isSyllableChoice && syllableCircleCount > 0 && (
-        <div className="syllable-circle-choices" role="group" aria-label="Separação em sílabas">
-          {Array.from({ length: syllableCircleCount }, (_, index) => {
-            const selected = selectedSyllableCircles.includes(index);
-            return (
-              <button
-                key={index}
-                type="button"
-                className={`syllable-circle-button${selected ? ' selected' : ''}`}
-                aria-label={`Sílaba ${index + 1}`}
-                aria-pressed={selected}
-                onClick={() => setSelectedSyllableCircles((current) =>
-                  current.includes(index)
-                    ? current.filter((circle) => circle !== index)
-                    : [...current, index],
-                )}
-              />
-            );
-          })}
-        </div>
-      )}
-
-      {/* Na prova de segmentação a criança responde tocando nos círculos; o avaliador não marca manualmente. */}
-      {!isProduction && !isComprehension && !isPhoneme && !isSyllableChoice && (
-        <div className="correct-row segmentation-mark-row" role="group" aria-label="Marcação de acerto ou erro">
-          <button
-            type="button"
-            className={`mark-btn correct${mark === true ? ' active' : ''}`}
-            onClick={() => {
-              if (phase === 'TRAINING') setTrainingMark(true);
-              else setUnit(currentUnit.itemNumber, { isCorrect: true, childAnswer: word, prompt: syllables, expectedAnswer: word });
-            }}
-          >
-            Acerto
-          </button>
-          <button
-            type="button"
-            className={`mark-btn wrong${mark === false ? ' active' : ''}`}
-            onClick={() => {
-              if (phase === 'TRAINING') setTrainingMark(false);
-              else setUnit(currentUnit.itemNumber, { isCorrect: false, childAnswer: '', prompt: syllables, expectedAnswer: word });
-            }}
-          >
-            Erro
-          </button>
-        </div>
-      )}
-
       <div className="step-nav">
         <button className="btn btn-secondary" type="button" onClick={onBack}><IconArrowLeft /> Voltar</button>
         <button className="btn btn-primary" type="button" onClick={() => {
-          if (isSyllableChoice) {
+          // A pergunta de acerto só existe na prova: exemplo não é pontuado.
+          if (isSegmentation && phase === 'TEST') {
             setAskingJudgement(true);
             return;
           }
@@ -1828,10 +1655,6 @@ function SegmentationStepView({
         <p>
           {word ? `Palavra: ${word}` : 'Registre o resultado deste item.'}
           {syllables ? ` · ${syllables}` : ''}
-        </p>
-        <p>
-          A criança bateu em {selectedSyllableCircles.length}{' '}
-          {selectedSyllableCircles.length === 1 ? 'círculo' : 'círculos'}.
         </p>
       </Modal>
     </div>

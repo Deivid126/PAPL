@@ -178,14 +178,31 @@ describe('Applications', () => {
       status: 'FINALIZED',
       finalizedReason: 'ERROR_LIMIT',
     });
+    // A seção encerrada não trava: dá para responder o item seguinte, e a
+    // parada por erros continua valendo porque a sequência de cinco segue lá.
     await saveItem(app, user.accessToken, app1.id, stepNumber, 8, { correct: true })
-      .then((res) => expect(res.status).toBe(403));
-
-    // Reenviar a MESMA resposta de uma seção finalizada não pode ser recusado:
-    // é o que o autosave faz ao abrir a aplicação. Recusar derrubava o lote
-    // inteiro e travava o avaliador numa seção que estava aberta.
-    await saveItem(app, user.accessToken, app1.id, stepNumber, 1, { correct: false })
       .then((res) => expect(res.status).toBe(201));
+    detail = await request(app.getHttpServer())
+      .get(`/applications/${app1.id}`)
+      .set(auth(user.accessToken))
+      .expect(200);
+    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).sections[1]).toMatchObject({
+      status: 'FINALIZED',
+      finalizedReason: 'ERROR_LIMIT',
+    });
+
+    // Corrigir uma resposta de uma seção já toda respondida também passa, e o
+    // estado da seção acompanha: quebrada a sequência de erros, ela reabre.
+    await saveItem(app, user.accessToken, app1.id, stepNumber, 5, { correct: true })
+      .then((res) => expect(res.status).toBe(201));
+    detail = await request(app.getHttpServer())
+      .get(`/applications/${app1.id}`)
+      .set(auth(user.accessToken))
+      .expect(200);
+    expect(detail.body.steps.find((s: any) => s.stepNumber === stepNumber).sections[1]).toMatchObject({
+      status: 'FINALIZED',
+      finalizedReason: 'ALL_ITEMS_ANSWERED',
+    });
 
     await request(app.getHttpServer())
       .post(`/applications/${app1.id}/steps/${stepNumber}/items/batch`)
